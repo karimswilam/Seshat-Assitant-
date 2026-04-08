@@ -6,8 +6,8 @@ from streamlit_folium import st_folium
 import folium
 import re
 
-# 1. إعدادات الهوية والأعلام
-FLAGS = {'ISR': '🇮🇱', 'EGY': '🇪🇬', 'ARS': '🇸🇦', 'UAE': '🇦🇪', 'JOR': '🇯🇴'}
+# 1. إعدادات الهوية
+FLAGS = {'ISR': '🇮🇱', 'EGY': '🇪🇬', 'ARS': '🇸🇦', 'UAE': '🇦🇪'}
 
 st.set_page_config(page_title="Seshat AI Dashboard", layout="wide")
 
@@ -28,78 +28,66 @@ def dms_to_decimal(dms_str):
 def load_and_fix_data():
     df = pd.read_csv("Data.csv", low_memory=False)
     df.columns = [c.lower().strip() for c in df.columns]
-    # التحويل لمرة واحدة وتخزينه في الكاش
     if 'location' in df.columns:
         coords = df['location'].apply(dms_to_decimal)
         df['lat'] = coords.apply(lambda x: x[0])
         df['lon'] = coords.apply(lambda x: x[1])
-    df['service'] = df['station_class'].map({'bc': 'Sound', 'bt': 'TV'}).fillna('Other')
+    # الربط البرمجي بين الكود ونوع الخدمة
+    df['service_label'] = df['station_class'].map({'bc': 'Sound', 'bt': 'TV'}).fillna('Other')
     return df
 
 df = load_and_fix_data()
 
-# --- Dashboard Header ---
+# --- واجهة المستخدم ---
 st.title("📡 Seshat AI: Spectrum Intelligence Dashboard")
-st.write("---")
 
-# Input Section
-col_query, col_btn = st.columns([4, 1])
-with col_query:
-    query = st.text_input("Enter Engineering Command:", placeholder="e.g., How many sound stations in Egypt?")
-with col_btn:
-    st.write(" ") # alignment
-    run_btn = st.button("🚀 Analyze Data")
+query = st.text_input("Enter Engineering Command:", placeholder="e.g., hya masr 3ndha kam m7ta sound")
+run_btn = st.button("🚀 Analyze Data")
 
 if run_btn and query:
-    # المنطق الرقمي (Logic Only)
+    # 2. منطق الفلترة (Filtering Logic)
     target_adm = "EGY" if any(x in query.lower() for x in ["egy", "egypt", "مصر"]) else \
                  "ISR" if any(x in query.lower() for x in ["isr", "israel", "إسرائيل"]) else None
     
     f_df = df[df['adm'] == target_adm] if target_adm else df
     
+    # تحديد نوع الخدمة المطلوبة
     if "tv" in query.lower():
-        f_df = f_df[f_df['service'] == 'TV']
-        lbl = "TV Stations"
+        f_df = f_df[f_df['service_label'] == 'TV']
+        service_title = "TV Broadcasting"
     else:
-        f_df = f_df[f_df['service'] == 'Sound']
-        lbl = "Sound Stations"
+        f_df = f_df[f_df['service_label'] == 'Sound']
+        service_title = "Sound Broadcasting"
 
     final_count = len(f_df)
-    
-    # --- عرض النتائج (Power BI Style) ---
-    c1, c2, c3 = st.columns([1, 1, 2])
-    
-    with c1:
-        # كارت الرقم (Metric Card)
-        st.metric(label=f"{lbl} Count", value=f"{final_count:,}")
-        st.markdown(f"### {FLAGS.get(target_adm, '🌐')} {target_adm or 'Global'}")
 
-    with c2:
-        # Pie Chart صغير للحالة
-        fig = px.pie(f_df, names='intent', hole=0.7, height=200)
-        fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-        st.plotly_chart(fig, use_container_width=True)
+    # --- العرض (Results Display) ---
+    col_flag, col_metric = st.columns([1, 3])
+    with col_flag:
+        st.markdown(f"<h1 style='font-size: 100px; margin:0;'>{FLAGS.get(target_adm, '🌐')}</h1>", unsafe_allow_html=True)
+    with col_metric:
+        st.metric(label=f"Total {service_title} in {target_adm or 'Global'}", value=f"{final_count:,}")
 
     st.write("---")
     
-    # الخريطة الكبيرة (Fixed Map)
+    # 3. الخريطة (The Map) - تم إصلاح القوس هنا
     st.subheader("📍 Geospatial Distribution")
     map_df = f_df.dropna(subset=['lat', 'lon'])
     
     if not map_df.empty:
-        # سنتر الخريطة على متوسط النقاط
         m = folium.Map(location=[map_df['lat'].mean(), map_df['lon'].mean()], 
                        zoom_start=6, tiles="CartoDB dark_matter")
         
-        # إضافة النقاط
         for _, row in map_df.head(200).iterrows():
             folium.CircleMarker(
                 location=[row['lat'], row['lon']],
-                radius=4,
+                radius=5,
                 color="#00d4ff",
                 fill=True,
-                popup=f"Site: {row.get('site name', 'Unknown')}"
+                popup=f"Site: {row.get('location', 'Unknown')}"
             ).add_to(m)
         
-        # عرض الخريطة مع منع الـ Rerun المفاجئ
-        st_folium(m, width="100%", height=500, key
+        # تصليح الـ Syntax: تأكد إن القوس مقفول صح
+        st_folium(m, width=1200, height=500, key="stable_map")
+    else:
+        st.warning("No valid coordinates found for mapping in this selection.")
