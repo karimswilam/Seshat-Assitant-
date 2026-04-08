@@ -2,84 +2,124 @@ import streamlit as st
 import pandas as pd
 import google.generativeai as genai
 import plotly.express as px
+from gtts import gTTS
+import io
 
-# 1. قاموس الأعلام (Mapping Codes to Emoji Flags)
+# 1. القاموس الهندسي والأعلام (Mapping Layer)
 FLAGS = {
     'EGY': '🇪🇬', 'ARS': '🇸🇦', 'UAE': '🇦🇪', 
     'KWT': '🇰🇼', 'JOR': '🇯🇴', 'OMN': '🇴🇲'
 }
 
-# 2. الهوية البصرية المطورة
+ENGINEERING_CONTEXT = """
+You are Seshat AI Core, a professional spectrum coordination system.
+Mappings: BC = Sound/Radio, BT = TV/Television, EGY = Egypt, ARS = Saudi Arabia.
+Instructions:
+- If the user asks for 'Sound', ignore 'TV' in charts.
+- Provide direct engineering facts.
+- Never identify as an AI or Gemini.
+"""
+
+# 2. إعدادات الواجهة الاحترافية (UI Branding)
 st.set_page_config(page_title="Seshat AI Core", page_icon="📡", layout="wide")
+
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: white; }
-    [data-testid="stMetricValue"] { font-size: 32px; color: #00d4ff; }
+    [data-testid="stMetricValue"] { font-size: 28px; color: #00d4ff; }
+    .stTextInput>div>div>input { background-color: #1a1c23; color: white; border-radius: 10px; }
+    .stButton>button { background: linear-gradient(90deg, #004e92 0%, #000428 100%); color: white; border-radius: 8px; width: 100%; }
     </style>
     """, unsafe_allow_html=True)
 
+# 3. محرك البيانات (Data Engine)
 @st.cache_data
-def load_and_map():
-    df = pd.read_csv("Data.csv", low_memory=False)
-    # تحويل الأنواع لأسماء واضحة
-    df['Service_Type'] = df['Station_Class'].map({'BC': 'Sound', 'BT': 'TV'}).fillna('Other')
-    return df
+def load_and_preprocess():
+    try:
+        df = pd.read_csv("Data.csv", low_memory=False)
+        # Pre-processing: تحويل الرموز لمصطلحات مفهومة في الرامات
+        df['Service_Type'] = df['Station_Class'].map({'BC': 'Sound/Radio', 'BT': 'Television'}).fillna('Other')
+        return df
+    except Exception as e:
+        st.error(f"Critical Data Error: {e}")
+        return None
 
-df = load_and_map()
+df = load_and_preprocess()
 
-# 3. الـ Dashboard Header
+# 4. الـ Dashboard Header
 st.title("📡 Seshat AI: International Coordination Core")
+st.caption("Advanced Spectrum Analytics | Proprietary Logic v3.5")
 st.write("---")
 
-# ميزة جديدة: اكتشاف الدولة من السؤال لإظهار العلم
-detected_flag = ""
-current_country = "Global"
+# 5. منطقة التحكم (Command Center)
+col_cmd, col_stats = st.columns([1.5, 1])
 
-# 4. محرك البحث الذكي (Logic Engine)
-st.subheader("⌨️ Engineering Command Center")
-user_query = st.text_input("Enter Query (e.g., sound stations in Egypt):")
+with col_cmd:
+    st.subheader("⌨️ Engineering Command")
+    user_query = st.text_input("Enter Query (e.g., sound recordings in Egypt):", placeholder="Type your command here...")
+    run_btn = st.button("🚀 Execute Analysis")
 
-if user_query:
-    # تحديد الدولة والعلم أوتوماتيكياً
-    if "egypt" in user_query.lower() or "masr" in user_query.lower() or "egy" in user_query.lower():
-        current_country = "Egypt"
-        detected_flag = FLAGS.get('EGY', '')
-    elif "saudi" in user_query.lower() or "ars" in user_query.lower():
-        current_country = "Saudi Arabia"
-        detected_flag = FLAGS.get('ARS', '')
+# 6. معالجة الاستعلام والذكاء الاصطناعي
+if run_btn and user_query:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    model = genai.GenerativeModel('models/gemini-3-flash-preview')
 
-    st.markdown(f"### Analyzing Data for: {detected_flag} {current_country}")
+    with st.spinner("Seshat Logic Layer calculating..."):
+        try:
+            # اكتشاف الدولة والعلم
+            current_country = "Global"
+            flag = "🌐"
+            if any(word in user_query.lower() for word in ["egypt", "masr", "egy"]):
+                current_country, flag = "Egypt", FLAGS['EGY']
+            elif any(word in user_query.lower() for word in ["saudi", "ars", "ksa"]):
+                current_country, flag = "Saudi Arabia", FLAGS['ARS']
 
-    # التصفية الذكية للـ Charts بناءً على السؤال
-    filtered_df = df.copy()
-    
-    # لو المستخدم سأل عن Sound بس، نفلتر الـ Chart
-    if "sound" in user_query.lower() or "radio" in user_query.lower():
-        filtered_df = df[df['Service_Type'] == 'Sound']
-        chart_title = "Sound Stations Analysis"
-    elif "tv" in user_query.lower() or "television" in user_query.lower():
-        filtered_df = df[df['Service_Type'] == 'TV']
-        chart_title = "TV Stations Analysis"
-    else:
-        chart_title = "General Distribution"
+            # فلترة الداتا بناءً على نوع الخدمة (Sound vs TV)
+            plot_df = df.copy()
+            if "sound" in user_query.lower() or "radio" in user_query.lower():
+                plot_df = df[df['Service_Type'] == 'Sound/Radio']
+                context_title = f"Sound Service Distribution - {current_country}"
+            elif "tv" in user_query.lower() or "television" in user_query.lower():
+                plot_df = df[df['Service_Type'] == 'Television']
+                context_title = f"TV Service Distribution - {current_country}"
+            else:
+                context_title = f"General Spectrum Distribution - {current_country}"
 
-    # عرض النتائج في كروت
-    col_a, col_b = st.columns([1, 2])
-    
-    with col_a:
-        st.metric(f"{current_country} Records", len(filtered_df[filtered_df['Adm'].str.contains('EGY|ARS', na=False)]))
-        st.success(f"Logic Engine: Verified entries for {current_country}")
+            # توليد الرد النصي الاحترافي
+            logic_prompt = f"{ENGINEERING_CONTEXT}\nUser Query: {user_query}\nData Summary: {len(plot_df)} records found. Provide a 1-sentence engineering report."
+            response = model.generate_content(logic_prompt).text
 
-    with col_b:
-        # رسم بياني ذكي يتغير حسب السؤال
-        fig = px.pie(filtered_df, names='Service_Type', title=chart_title, hole=0.4,
-                     color_discrete_sequence=['#00d4ff', '#004e92'])
-        st.plotly_chart(fig, use_container_width=True)
+            # عرض النتائج
+            st.markdown(f"### {flag} Analysis for {current_country}")
+            st.success(response)
 
-# 5. الـ System Trace
-with st.expander("🛠️ Intelligence Trace Log"):
+            # الرسم البياني الذكي (Context-Aware)
+            # هنقسمه هنا حسب الـ Intent عشان ندي معلومة جديدة بدل ما نكرر النوع
+            fig = px.pie(plot_df, names='Intent', title=context_title, hole=0.5,
+                         color_discrete_sequence=px.colors.sequential.RdBu)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # الرد الصوتي
+            tts = gTTS(text=response, lang='en')
+            audio_io = io.BytesIO()
+            tts.write_to_fp(audio_io)
+            st.audio(audio_io.getvalue(), format='audio/mp3')
+
+        except Exception as e:
+            st.error(f"Logic Layer Error: {e}")
+
+# 7. الـ Global Metrics (دائماً واضحة تحت الهيدر أو في الجنب)
+with col_stats:
+    st.subheader("📊 Global Metrics")
+    st.metric("Total System Records", f"{len(df):,}")
+    st.metric("Unique Admins", df['Adm'].nunique())
+    st.metric("Engine Status", "Active", delta="Optimized")
+
+# 8. الـ System Terminal (Trace Log)
+with st.expander("🛠️ System Trace Log"):
     st.code(f"""
-    [GEO] Country Detected: {current_country}
-    [FLAG] Identity Mapping: {detected_flag}
-    [FILTER] Applied Context: {chart_title}
+    [SYS] Seshat Engine V3.5 Booted.
+    [PRE] Pre-processing: Station_Class mapped to Labels.
+    [GEO] Flag Mapping Library: Loaded.
+    [READY] Waiting for user command...
     """, language='bash')
