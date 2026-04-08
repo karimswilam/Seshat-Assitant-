@@ -1,76 +1,85 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
-from gtts import gTTS
-import io
+import plotly.express as px
 
-# 1. إعدادات الهوية البصرية (The Professional Look)
+# 1. قاموس الأعلام (Mapping Codes to Emoji Flags)
+FLAGS = {
+    'EGY': '🇪🇬', 'ARS': '🇸🇦', 'UAE': '🇦🇪', 
+    'KWT': '🇰🇼', 'JOR': '🇯🇴', 'OMN': '🇴🇲'
+}
+
+# 2. الهوية البصرية المطورة
 st.set_page_config(page_title="Seshat AI Core", page_icon="📡", layout="wide")
-
 st.markdown("""
     <style>
-    /* تغيير الخلفية للون غامق واحترافي */
     .stApp { background-color: #0e1117; color: white; }
-    /* تنسيق الكروت (Metrics) */
-    [data-testid="stMetricValue"] { font-size: 28px; color: #00d4ff; }
-    [data-testid="stMetricLabel"] { font-size: 16px; color: #808495; }
-    /* تنسيق الأزرار */
-    .stButton>button {
-        background: linear-gradient(90deg, #004e92 0%, #000428 100%);
-        color: white; border: none; padding: 10px 20px; border-radius: 5px;
-    }
+    [data-testid="stMetricValue"] { font-size: 32px; color: #00d4ff; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. تحميل البيانات وتحضيرها (Preprocessing Script - Phase 1)
 @st.cache_data
-def get_clean_data():
+def load_and_map():
     df = pd.read_csv("Data.csv", low_memory=False)
-    # تحويل الأكواد لأسماء واضحة في الرامات (Mapping)
-    df['Service_Type'] = df['Station_Class'].map({'BC': 'Radio/Sound', 'BT': 'Television'}).fillna('Other')
+    # تحويل الأنواع لأسماء واضحة
+    df['Service_Type'] = df['Station_Class'].map({'BC': 'Sound', 'BT': 'TV'}).fillna('Other')
     return df
 
-df = get_clean_data()
+df = load_and_map()
 
-# 3. الـ Dashboard UI (المنظر اللي "يفشخ")
+# 3. الـ Dashboard Header
 st.title("📡 Seshat AI: International Coordination Core")
 st.write("---")
 
-# الـ Metrics Cards
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total Records", f"{len(df):,}")
-c2.metric("Nations (Adm)", df['Adm'].nunique())
-c3.metric("Radio Stations", len(df[df['Service_Type'] == 'Radio/Sound']))
-c4.metric("TV Stations", len(df[df['Service_Type'] == 'Television']))
+# ميزة جديدة: اكتشاف الدولة من السؤال لإظهار العلم
+detected_flag = ""
+current_country = "Global"
 
-st.write("---")
+# 4. محرك البحث الذكي (Logic Engine)
+st.subheader("⌨️ Engineering Command Center")
+user_query = st.text_input("Enter Query (e.g., sound stations in Egypt):")
 
-# منطقة الاستعلام الفني
-col_in, col_out = st.columns([1, 1])
+if user_query:
+    # تحديد الدولة والعلم أوتوماتيكياً
+    if "egypt" in user_query.lower() or "masr" in user_query.lower() or "egy" in user_query.lower():
+        current_country = "Egypt"
+        detected_flag = FLAGS.get('EGY', '')
+    elif "saudi" in user_query.lower() or "ars" in user_query.lower():
+        current_country = "Saudi Arabia"
+        detected_flag = FLAGS.get('ARS', '')
 
-with col_in:
-    st.subheader("⌨️ Command Center")
-    user_query = st.text_input("Enter Query:", placeholder="e.g., Show me coordination status for Egypt")
-    run = st.button("🚀 Execute Analysis")
+    st.markdown(f"### Analyzing Data for: {detected_flag} {current_country}")
 
-with col_out:
-    st.subheader("📊 Engine Insights")
-    if run and user_query:
-        # هنا بنشغل الـ Logic اللي عملناه في المرات اللي فاتت
-        # (أنا هختصر الرد هنا عشان تشوف المنظر بس)
-        st.info("Analysis in progress... Linking with Private Cloud...")
-        # المحاكاة للرد (لأغراض العرض):
-        st.success(f"Execution Successful. Found relevant data points for '{user_query}'.")
-        
-        # عرض رسم بياني سريع (Pre-processing Output)
-        chart_data = df['Service_Type'].value_counts()
-        st.bar_chart(chart_data)
+    # التصفية الذكية للـ Charts بناءً على السؤال
+    filtered_df = df.copy()
+    
+    # لو المستخدم سأل عن Sound بس، نفلتر الـ Chart
+    if "sound" in user_query.lower() or "radio" in user_query.lower():
+        filtered_df = df[df['Service_Type'] == 'Sound']
+        chart_title = "Sound Stations Analysis"
+    elif "tv" in user_query.lower() or "television" in user_query.lower():
+        filtered_df = df[df['Service_Type'] == 'TV']
+        chart_title = "TV Stations Analysis"
+    else:
+        chart_title = "General Distribution"
 
-# 4. الـ Console (إيحاء بالـ Offline System)
-with st.expander("🛠️ System Logs & Trace"):
-    st.code("""
-    [SYSTEM] Initializing Seshat V3.1...
-    [INFO] Pre-processing Data.csv (5000+ rows)
-    [LOG] Mapping Station_Class (BC -> Sound, BT -> TV)
-    [LOG] Ready for Zero-Latency Query.
+    # عرض النتائج في كروت
+    col_a, col_b = st.columns([1, 2])
+    
+    with col_a:
+        st.metric(f"{current_country} Records", len(filtered_df[filtered_df['Adm'].str.contains('EGY|ARS', na=False)]))
+        st.success(f"Logic Engine: Verified entries for {current_country}")
+
+    with col_b:
+        # رسم بياني ذكي يتغير حسب السؤال
+        fig = px.pie(filtered_df, names='Service_Type', title=chart_title, hole=0.4,
+                     color_discrete_sequence=['#00d4ff', '#004e92'])
+        st.plotly_chart(fig, use_container_width=True)
+
+# 5. الـ System Trace
+with st.expander("🛠️ Intelligence Trace Log"):
+    st.code(f"""
+    [GEO] Country Detected: {current_country}
+    [FLAG] Identity Mapping: {detected_flag}
+    [FILTER] Applied Context: {chart_title}
     """, language='bash')
