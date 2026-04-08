@@ -5,22 +5,22 @@ import plotly.express as px
 from gtts import gTTS
 import io
 
-# 1. القاموس الهندسي والأعلام (Mapping Layer)
+# 1. إعدادات الهوية الهندسية والأعلام
 FLAGS = {
     'EGY': '🇪🇬', 'ARS': '🇸🇦', 'UAE': '🇦🇪', 
     'KWT': '🇰🇼', 'JOR': '🇯🇴', 'OMN': '🇴🇲'
 }
 
 ENGINEERING_CONTEXT = """
-You are Seshat AI Core, a professional spectrum coordination system.
-Mappings: BC = Sound/Radio, BT = TV/Television, EGY = Egypt, ARS = Saudi Arabia.
-Instructions:
-- If the user asks for 'Sound', ignore 'TV' in charts.
-- Provide direct engineering facts.
-- Never identify as an AI or Gemini.
+You are Seshat AI Core, a proprietary spectrum coordination engine.
+Context: BC=Sound, BT=TV, EGY=Egypt, ARS=Saudi Arabia.
+Rules:
+- If query mentions 'Sound', filter charts to show only 'Sound/Radio'.
+- If query mentions 'TV', filter charts to show only 'Television'.
+- Always respond as an engineering system, never as an AI assistant.
 """
 
-# 2. إعدادات الواجهة الاحترافية (UI Branding)
+# 2. تصميم الـ Dashboard الاحترافي
 st.set_page_config(page_title="Seshat AI Core", page_icon="📡", layout="wide")
 
 st.markdown("""
@@ -28,98 +28,103 @@ st.markdown("""
     .stApp { background-color: #0e1117; color: white; }
     [data-testid="stMetricValue"] { font-size: 28px; color: #00d4ff; }
     .stTextInput>div>div>input { background-color: #1a1c23; color: white; border-radius: 10px; }
-    .stButton>button { background: linear-gradient(90deg, #004e92 0%, #000428 100%); color: white; border-radius: 8px; width: 100%; }
+    .stButton>button { 
+        background: linear-gradient(90deg, #004e92 0%, #000428 100%); 
+        color: white; border-radius: 8px; border: none; height: 3em;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. محرك البيانات (Data Engine)
+# 3. محرك معالجة البيانات (Preprocessing)
 @st.cache_data
-def load_and_preprocess():
+def load_and_clean_data():
     try:
+        # تحميل البيانات مع توحيد المسميات لسهولة الفلترة
         df = pd.read_csv("Data.csv", low_memory=False)
-        # Pre-processing: تحويل الرموز لمصطلحات مفهومة في الرامات
         df['Service_Type'] = df['Station_Class'].map({'BC': 'Sound/Radio', 'BT': 'Television'}).fillna('Other')
         return df
     except Exception as e:
-        st.error(f"Critical Data Error: {e}")
+        st.error(f"Data Core Error: {e}")
         return None
 
-df = load_and_preprocess()
+df = load_and_clean_data()
 
-# 4. الـ Dashboard Header
-st.title("📡 Seshat AI: International Coordination Core")
-st.caption("Advanced Spectrum Analytics | Proprietary Logic v3.5")
+# 4. واجهة العرض الرئيسية
+st.title("📡 Seshat AI: Spectrum Coordination Core")
+st.caption("International Regulatory Framework Analysis | V3.6")
 st.write("---")
 
-# 5. منطقة التحكم (Command Center)
-col_cmd, col_stats = st.columns([1.5, 1])
+# Metrics Quick View
+if df is not None:
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Records", f"{len(df):,}")
+    m2.metric("Administrations", df['Adm'].nunique())
+    m3.metric("Radio (BC)", len(df[df['Service_Type'] == 'Sound/Radio']))
+    m4.metric("TV (BT)", len(df[df['Service_Type'] == 'Television']))
 
-with col_cmd:
-    st.subheader("⌨️ Engineering Command")
-    user_query = st.text_input("Enter Query (e.g., sound recordings in Egypt):", placeholder="Type your command here...")
-    run_btn = st.button("🚀 Execute Analysis")
+st.write("---")
 
-# 6. معالجة الاستعلام والذكاء الاصطناعي
-if run_btn and user_query:
+# 5. مركز تنفيذ الأوامر (Command Center)
+col_input, col_viz = st.columns([1, 1.2])
+
+with col_input:
+    st.subheader("⌨️ Execute Command")
+    query = st.text_input("Engineering Query:", placeholder="e.g., show me recorded sound stations for Egypt...")
+    run = st.button("🚀 Run System Analysis")
+
+if run and query and df is not None:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     model = genai.GenerativeModel('models/gemini-3-flash-preview')
-
-    with st.spinner("Seshat Logic Layer calculating..."):
+    
+    with st.spinner("Seshat Logic Layer processing..."):
         try:
-            # اكتشاف الدولة والعلم
-            current_country = "Global"
+            # اكتشاف الدولة لإظهار العلم
             flag = "🌐"
-            if any(word in user_query.lower() for word in ["egypt", "masr", "egy"]):
-                current_country, flag = "Egypt", FLAGS['EGY']
-            elif any(word in user_query.lower() for word in ["saudi", "ars", "ksa"]):
-                current_country, flag = "Saudi Arabia", FLAGS['ARS']
+            country_name = "Global"
+            if any(x in query.lower() for x in ["egypt", "masr", "egy"]):
+                flag, country_name = FLAGS['EGY'], "Egypt"
+            elif any(x in query.lower() for x in ["saudi", "ars", "ksa"]):
+                flag, country_name = FLAGS['ARS'], "Saudi Arabia"
 
-            # فلترة الداتا بناءً على نوع الخدمة (Sound vs TV)
-            plot_df = df.copy()
-            if "sound" in user_query.lower() or "radio" in user_query.lower():
-                plot_df = df[df['Service_Type'] == 'Sound/Radio']
-                context_title = f"Sound Service Distribution - {current_country}"
-            elif "tv" in user_query.lower() or "television" in user_query.lower():
-                plot_df = df[df['Service_Type'] == 'Television']
-                context_title = f"TV Service Distribution - {current_country}"
-            else:
-                context_title = f"General Spectrum Distribution - {current_country}"
+            # الفلترة الذكية للبيانات والرسوم بناءً على محتوى السؤال
+            analysis_df = df.copy()
+            chart_title = f"Data Distribution - {country_name}"
+            
+            if "sound" in query.lower() or "radio" in query.lower():
+                analysis_df = df[df['Service_Type'] == 'Sound/Radio']
+                chart_title = f"Sound Service Status - {country_name}"
+            elif "tv" in query.lower() or "television" in query.lower():
+                analysis_df = df[df['Service_Type'] == 'Television']
+                chart_title = f"TV Service Status - {country_name}"
 
-            # توليد الرد النصي الاحترافي
-            logic_prompt = f"{ENGINEERING_CONTEXT}\nUser Query: {user_query}\nData Summary: {len(plot_df)} records found. Provide a 1-sentence engineering report."
-            response = model.generate_content(logic_prompt).text
+            # توليد التقرير الفني
+            prompt = f"{ENGINEERING_CONTEXT}\nQuery: {query}\nResult Count: {len(analysis_df)}\nProvide 1 formal sentence."
+            report = model.generate_content(prompt).text
 
-            # عرض النتائج
-            st.markdown(f"### {flag} Analysis for {current_country}")
-            st.success(response)
+            # العرض النهائي
+            st.markdown(f"### {flag} {country_name} Analysis")
+            st.success(report)
 
-            # الرسم البياني الذكي (Context-Aware)
-            # هنقسمه هنا حسب الـ Intent عشان ندي معلومة جديدة بدل ما نكرر النوع
-            fig = px.pie(plot_df, names='Intent', title=context_title, hole=0.5,
-                         color_discrete_sequence=px.colors.sequential.RdBu)
-            st.plotly_chart(fig, use_container_width=True)
+            with col_viz:
+                # رسم بياني تفاعلي يعتمد على "حالة التنسيق" (Intent) لإعطاء عمق أكبر للتحليل
+                fig = px.pie(analysis_df, names='Intent', title=chart_title, hole=0.4,
+                             color_discrete_sequence=px.colors.qualitative.Pastel)
+                st.plotly_chart(fig, use_container_width=True)
 
-            # الرد الصوتي
-            tts = gTTS(text=response, lang='en')
-            audio_io = io.BytesIO()
-            tts.write_to_fp(audio_io)
-            st.audio(audio_io.getvalue(), format='audio/mp3')
+            # تحويل التقرير لصوت احترافي
+            tts = gTTS(text=report, lang='en')
+            audio_file = io.BytesIO()
+            tts.write_to_fp(audio_file)
+            st.audio(audio_file.getvalue(), format='audio/mp3')
 
         except Exception as e:
-            st.error(f"Logic Layer Error: {e}")
+            st.error(f"Analysis Error: {e}")
 
-# 7. الـ Global Metrics (دائماً واضحة تحت الهيدر أو في الجنب)
-with col_stats:
-    st.subheader("📊 Global Metrics")
-    st.metric("Total System Records", f"{len(df):,}")
-    st.metric("Unique Admins", df['Adm'].nunique())
-    st.metric("Engine Status", "Active", delta="Optimized")
-
-# 8. الـ System Terminal (Trace Log)
-with st.expander("🛠️ System Trace Log"):
+# 6. سجل تتبع النظام (System Trace)
+with st.expander("🛠️ Internal Logic Trace"):
     st.code(f"""
-    [SYS] Seshat Engine V3.5 Booted.
-    [PRE] Pre-processing: Station_Class mapped to Labels.
-    [GEO] Flag Mapping Library: Loaded.
-    [READY] Waiting for user command...
-    """, language='bash')
+    [LOG] Identity: Seshat AI Core V3.6
+    [GEO] Country Detection: {country_name if 'country_name' in locals() else 'Idle'}
+    [DATA] Preprocessing: Station_Class mapped to Service_Type.
+    [SYS] Audio Engine: gTTS Ready.
+    """, language="bash")
