@@ -4,27 +4,30 @@ import google.generativeai as genai
 from gtts import gTTS
 import io
 
-# 1. إعدادات الصفحة والتصميم
+# 1. إعدادات الصفحة
 st.set_page_config(page_title="Seshat AI - Spectrum Phase 1", page_icon="📡", layout="wide")
 st.title("📡 Seshat: International Coordination Assistant")
 st.markdown("---")
 
 # 2. إعداد الـ API Key والموديل
-# تأكد من وضع المفتاح في Secrets بـ Streamlit تحت اسم GEMINI_API_KEY
 if "GEMINI_API_KEY" not in st.secrets:
     st.error("Missing API Key! Please add it to Streamlit Secrets.")
     st.stop()
 
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# استخدام نسخة مستقرة لضمان عدم حدوث NotFound Error
-model = genai.GenerativeModel('gemini-1.5-flash')
+# الحل النهائي لمشكلة الـ 404: تجربة المسار الكامل للموديل
+# جربنا 'gemini-1.5-flash' وفشل، هنستخدم 'models/gemini-1.5-pro' كأضمن نسخة مستقرة
+try:
+    model = genai.GenerativeModel('models/gemini-1.5-pro')
+except:
+    model = genai.GenerativeModel('gemini-1.5-pro')
 
-# 3. معالجة البيانات (الـ 5000 صف)
+# 3. معالجة البيانات (2277 سجل كما ظهر في الـ Logs)
 @st.cache_data
 def load_spectrum_data():
     try:
-        # تحميل البيانات مع معالجة الأنواع لتقليل استهلاك الذاكرة
+        # قراءة الملف بـ low_memory لضمان السرعة
         df = pd.read_csv("Data.csv", low_memory=False)
         return df
     except Exception as e:
@@ -33,63 +36,61 @@ def load_spectrum_data():
 
 df = load_spectrum_data()
 
-# 4. واجهة المستخدم (UI Layout)
+# 4. واجهة المستخدم
 col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("⌨️ Execute Command")
     user_input = st.text_input("Ask Seshat about the frequency sheet:", 
-                                placeholder="e.g., How many ARS recordings are there?")
+                                placeholder="How many ARS recordings are there?")
     run_button = st.button("🚀 Run Analysis")
 
 with col2:
     if df is not None:
         st.subheader("📊 Sheet Overview")
         st.write(f"Total Records in File: **{len(df)}**")
-        st.write("Status: **Ready for Validation**")
+        st.write("Status: **System Online & Ready**")
     else:
-        st.error("Data file not found or corrupted.")
+        st.error("Data.csv file not found.")
 
 # 5. منطق التشغيل (Core Logic)
 if run_button and user_input and df is not None:
-    with st.spinner("Processing Proxy Voice & Data..."):
+    with st.spinner("Analyzing Spectrum Data..."):
         try:
-            # أ- توليد صوت الـ Proxy (مدخلات المستخدم)
-            # تمهيداً للمستقبل: هنا يمكن استبدال gTTS بموديل بصمة صوتك
+            # صوت الـ Proxy كـ Input (لحماية بصمة صوتك)
             input_tts = gTTS(text=user_input, lang='en')
             audio_in_fp = io.BytesIO()
             input_tts.write_to_fp(audio_in_fp)
             st.audio(audio_in_fp.getvalue(), format='audio/mp3')
 
-            # ب- تجهيز السياق (Context)
-            # سنرسل أول 1000 صف للـ Validation لضمان استقرار الـ API
-            data_context = df.head(1000).to_string()
+            # إرسال البيانات كاملة لـ Gemini
+            # بما إنهم حوالي 2200 سجل، Gemini Pro يقدر يستوعبهم كلهم بسهولة
+            data_context = df.to_string()
             
             full_prompt = (
-                f"You are an expert International Coordination Engineer. "
-                f"Analyze the following spectrum data (first 1000 rows):\n\n"
+                f"You are an International Coordination Engineer. Use this spectrum data:\n\n"
                 f"{data_context}\n\n"
                 f"User Question: {user_input}\n"
-                f"Please provide a precise, engineering-focused answer."
+                f"Provide a professional engineering answer."
             )
             
-            # ج- طلب الرد من Gemini
+            # طلب الرد
             response = model.generate_content(full_prompt)
             
-            # د- عرض وتحويل الرد لصوت
+            # عرض الرد الصوتي والنصي
             st.markdown("### 🤖 Assistant Response:")
             st.success(response.text)
             
-            # توليد صوت الرد (مخرج المساعد)
+            # صوت الـ Proxy كـ Output
             output_tts = gTTS(text=response.text, lang='en')
             audio_out_fp = io.BytesIO()
             output_tts.write_to_fp(audio_out_fp)
             st.audio(audio_out_fp.getvalue(), format='audio/mp3')
 
         except Exception as e:
-            st.error(f"An error occurred during processing: {e}")
-            st.info("Check if your API Key is valid and active in Google AI Studio.")
+            st.error(f"Processing Error: {e}")
+            st.info("Try checking your API usage limits in Google AI Studio.")
 
-# 6. قسم التطوير المستقبلي
+# 6. Roadmap
 st.sidebar.markdown("### 🛠️ Roadmap")
-st.sidebar.info("Phase 1: Validation (Current)\nPhase 2: Custom Voice Training\nPhase 3: Full ITU Database RAG")
+st.sidebar.info("Phase 1: Validation (Current)\nPhase 2: Custom Voice Integration\nPhase 3: Automated Coordination Reporting")
