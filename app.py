@@ -7,12 +7,9 @@ import re
 from gtts import gTTS
 import io
 
-# 1. إعدادات الهوية
-FLAGS = {'ISR': '🇮🇱', 'EGY': '🇪🇬', 'ARS': '🇸🇦', 'UAE': '🇦🇪'}
+st.set_page_config(page_title="Seshat AI: Spectrum Core", layout="wide")
 
-st.set_page_config(page_title="Seshat AI: Core", layout="wide")
-
-# --- تحسين معالجة البيانات ---
+# --- معالجة البيانات ---
 def dms_to_decimal(dms_str):
     try:
         parts = re.findall(r"(\d+)°(\d+)'(\d+)\"\s*([NSEW])", str(dms_str))
@@ -33,86 +30,73 @@ def load_data():
         coords = df['location'].apply(dms_to_decimal)
         df['lat'] = coords.apply(lambda x: x[0])
         df['lon'] = coords.apply(lambda x: x[1])
+    # الحل النهائي لـ AttributeError: استخدام .str
     for col in ['adm', 'station_class', 'notice type']:
         if col in df.columns:
-            df[col] = df[col].astype(str).upper().strip()
+            df[col] = df[col].astype(str).str.upper().str.strip()
     return df
 
 df = load_data()
 
-# --- دالة الـ AI (The Brain) ---
-def get_ai_response(count, country, service, n_type, query):
+# --- محرك الـ AI للرد العامي ---
+def get_ai_voice_response(count, country, service, n_type, query):
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('models/gemini-1.5-flash') # استخدام Flash أسرع من Pro
+    model = genai.GenerativeModel('models/gemini-1.5-flash') 
     
     prompt = f"""
-    Context: Telecommunications Spectrum Data.
-    Data: {count} {service} stations found for {country}. Filter: {n_type}.
-    Query: {query}
-    Task: Respond as an Egyptian Engineer in concise Egyptian Arabic (Ammiya). 
-    Focus on the numbers and technical facts directly. No generic intros.
+    Context: Telecom Data Analysis.
+    Data: Found {count} {service} stations for {country}. Filter: {n_type}.
+    User Query: "{query}"
+    Task: Respond directly in natural Egyptian Arabic (Ammiya). 
+    Do not use generic "ya handsa" or fixed templates. 
+    Just answer the question based on the numbers provided in a helpful, colleague-like way.
     """
     try:
-        response = model.generate_content(prompt)
-        return response.text
+        return model.generate_content(prompt).text
     except:
-        return f"موجود {count} محطة {service} في {country}."
+        return f"فيه {count} محطة {service} في {country}."
 
-# --- UI Layout ---
-st.title("📡 Seshat AI: Precision Engine")
-query = st.text_input("Engineering Query:", key="user_query")
+# --- UI ---
+st.title("📡 Seshat AI: Intelligent Spectrum Dashboard")
+query = st.text_input("اسأل عن محطات الترددات (مثلاً: مصر فيها كام محطة TB2؟):")
 
-if st.button("🚀 Analyze") and query:
+if st.button("🚀 تحليل") and query:
     q = query.lower()
     
-    # 1. Python Fast Filtering
+    # فلترة سريعة
     target = "EGY" if any(x in q for x in ["egy", "masr", "مصر"]) else "ISR" if any(x in q for x in ["isr", "israel"]) else None
     f_df = df[df['adm'] == target] if target else df
     
     n_type = re.search(r'tb\d+', q).group(0).upper() if re.search(r'tb\d+', q) else None
     if n_type: f_df = f_df[f_df['notice type'] == n_type]
     
-    is_tv = any(x in q for x in ["tv", "bt"])
+    is_tv = any(x in q for x in ["tv", "bt", "تلفزيون"])
     f_df = f_df[f_df['station_class'] == ('BT' if is_tv else 'BC')]
-    s_label = "تلفزيون" if is_tv else "إذاعة"
+    s_label = "تلفزيون" if is_tv else "إذاعة صوتية"
     
     res_count = len(f_df)
 
-    # 2. AI Humanized Response & Voice
-    with st.spinner("Seshat is processing..."):
-        ai_text = get_ai_response(res_count, target, s_label, n_type, query)
-        
-        # تحويل الصوت
-        tts = gTTS(text=ai_text, lang='ar')
+    with st.spinner("جاري صياغة الرد..."):
+        ai_msg = get_ai_voice_response(res_count, target, s_label, n_type, query)
+        tts = gTTS(text=ai_msg, lang='ar')
         audio_fp = io.BytesIO()
         tts.write_to_fp(audio_fp)
         
-        # حفظ في الـ Session
-        st.session_state.current_results = {
-            'text': ai_text,
-            'audio': audio_fp.getvalue(),
-            'df': f_df,
-            'count': res_count,
-            'adm': target
+        st.session_state.last_res = {
+            'msg': ai_msg, 'audio': audio_fp.getvalue(), 
+            'df': f_df, 'count': res_count, 'adm': target
         }
 
-# --- Display Section ---
-if 'current_results' in st.session_state:
-    res = st.session_state.current_results
-    
+if 'last_res' in st.session_state:
+    res = st.session_state.last_res
     st.audio(res['audio'], format='audio/mp3')
-    st.success(res['text'])
+    st.info(res['msg'])
     
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        st.metric(label="Results Count", value=res['count'])
-        st.markdown(f"**Target:** {FLAGS.get(res['adm'], '🌐')} {res['adm']}")
-        
-    with c2:
-        m_df = res['df'].dropna(subset=['lat', 'lon'])
-        if not m_df.empty:
-            m = folium.Map(location=[m_df['lat'].mean(), m_df['lon'].mean()], zoom_start=6, 
-                           tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attr="CartoDB")
-            for _, row in m_df.head(100).iterrows():
-                folium.CircleMarker([row['lat'], row['lon']], radius=5, color="#00FBFF", fill=True).add_to(m)
-            st_folium(m, key="stable_map", width=700, height=400, returned_objects=[])
+    # عرض الخريطة
+    m_df = res['df'].dropna(subset=['lat', 'lon'])
+    if not m_df.empty:
+        m = folium.Map(location=[m_df['lat'].mean(), m_df['lon'].mean()], zoom_start=6, 
+                       tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attr="CartoDB")
+        for _, row in m_df.head(100).iterrows():
+            folium.CircleMarker([row['lat'], row['lon']], radius=5, color="#00FBFF", fill=True).add_to(m)
+        st_folium(m, key="spectrum_map", width=900, height=500)
