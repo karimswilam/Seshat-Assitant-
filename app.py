@@ -9,7 +9,7 @@ import io
 # 1. إعدادات الهوية
 FLAGS = {'ISR': '🇮🇱', 'EGY': '🇪🇬', 'ARS': '🇸🇦', 'UAE': '🇦🇪'}
 
-st.set_page_config(page_title="Seshat AI: Location Intelligence", layout="wide")
+st.set_page_config(page_title="Seshat AI: Egyptian Intelligence", layout="wide")
 
 def dms_to_decimal(dms_str):
     try:
@@ -31,7 +31,6 @@ def load_data():
         coords = df['location'].apply(dms_to_decimal)
         df['lat'] = coords.apply(lambda x: x[0])
         df['lon'] = coords.apply(lambda x: x[1])
-    # توحيد البيانات لضمان الفلترة
     for col in ['adm', 'station_class', 'notice type']:
         if col in df.columns:
             df[col] = df[col].astype(str).str.upper().str.strip()
@@ -39,47 +38,44 @@ def load_data():
 
 df = load_data()
 
-# تهيئة الذاكرة المؤقتة بشكل آمن
 if 'results' not in st.session_state:
     st.session_state.results = {}
 
-st.title("📡 Seshat AI: Spectrum Intelligence Dashboard")
+st.title("📡 Seshat AI: Spectrum Intelligence")
 
-query = st.text_input("Engineering Query:", placeholder="e.g., hya masr 3ndha kam m7ta sound notice type TB2")
+query = st.text_input("Engineering Query (العامية المصرية):", placeholder="مثلاً: مصر عندها كام محطة صوت نوعها TB2")
 
-if st.button("🚀 Analyze Data") and query:
+if st.button("🚀 تحليل البيانات"):
     q = query.lower()
     
-    # تحديد الدولة والخدمة
-    target = "EGY" if any(x in q for x in ["egy", "masr", "مصر"]) else "ISR" if any(x in q for x in ["isr", "israel", "إسرائيل"]) else None
+    # منطق الفلترة
+    target = "EGY" if any(x in q for x in ["egy", "masr", "مصر"]) else "ISR" if any(x in q for x in ["isr", "إسرائيل"]) else None
     f_df = df[df['adm'] == target] if target else df
     
-    # التقاط الـ Notice Type بذكاء
     n_type = None
     notice_match = re.search(r'tb\d+', q)
     if notice_match:
         n_type = notice_match.group(0).upper()
         f_df = f_df[f_df['notice type'] == n_type]
     
-    # تحديد نوع المحطة
-    if any(x in q for x in ["tv", "bt"]):
-        f_df = f_df[f_df['station_class'] == 'BT']
-        s_label = "TV Stations"
-    else:
-        f_df = f_df[f_df['station_class'] == 'BC']
-        s_label = "Sound Stations"
-
+    is_tv = any(x in q for x in ["tv", "تلفزيون", "bt"])
+    f_df = f_df[f_df['station_class'] == ('BT' if is_tv else 'BC')]
+    s_label = "تلفزيون" if is_tv else "إذاعة صوتية"
     res_count = len(f_df)
     
-    # إنشاء الرد الصوتي (English Humanized)
-    voice_txt = f"Engineer, for {target or 'Global'}, I found {res_count} {s_label}."
-    if n_type: voice_txt += f" under notice type {n_type}."
+    # --- الرد بالعامية المصرية (Humanized Arabic) ---
+    country_name = "مصر" if target == "EGY" else "المنطقة اللي اخترتها"
     
-    tts = gTTS(text=voice_txt, lang='en')
+    # صياغة الجملة بالعامية
+    voice_txt = f"يا هندسة، بالنسبة لـ{country_name}، أنا لقيت {res_count} محطة {s_label}."
+    if n_type:
+        voice_txt += f" ودول اللي نوعهم {n_type} زي ما طلبت."
+    
+    # توليد الصوت باللغة العربية
+    tts = gTTS(text=voice_txt, lang='ar')
     audio_fp = io.BytesIO()
     tts.write_to_fp(audio_fp)
     
-    # حفظ النتائج
     st.session_state.results = {
         'df': f_df,
         'count': res_count,
@@ -89,16 +85,24 @@ if st.button("🚀 Analyze Data") and query:
         'n_type': n_type
     }
 
-# --- واجهة العرض (UI) المستقرة ---
+# --- واجهة العرض ---
 res = st.session_state.results
 if res:
-    # تشغيل الصوت
     if 'audio' in res:
         st.audio(res['audio'], format='audio/mp3')
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.markdown(f"## {FLAGS.get(res.get('adm'), '🌐')} {res.get('adm', 'Global')}")
-        st.metric(label=f"Total {res.get('label')}", value=res.get('count', 0))
+        st.markdown(f"## {FLAGS.get(res.get('adm'), '🌐')} {res.get('adm')}")
+        st.metric(label=f"إجمالي محطات {res.get('label')}", value=res.get('count'))
+        if res.get('n_type'):
+            st.info(f"الفلتر المستخدم: {res['n_type']}")
         
-        # التأكد من وجود n_type قبل
+    with col2:
+        m_df = res['df'].dropna(subset=['lat', 'lon'])
+        if not m_df.empty:
+            m = folium.Map(location=[m_df['lat'].mean(), m_df['lon'].mean()], zoom_start=6, 
+                           tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attr="CartoDB")
+            for _, row in m_df.head(200).iterrows():
+                folium.CircleMarker([row['lat'], row['lon']], radius=5, color="#00FBFF", fill=True).add_to(m)
+            st_folium(m, key="egy_map", width=800, height=480, returned_objects=[])
