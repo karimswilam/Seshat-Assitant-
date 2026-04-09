@@ -7,172 +7,127 @@ from gtts import gTTS
 import io
 import re
 
-st.set_page_config(page_title="Seshat Engineering Voice Assistant", layout="wide")
+st.set_page_config(page_title="Seshat Engineering Hub", layout="wide")
 
 # =====================================================
-# DMS → Decimal
+# 1. DMS → Decimal (Regex مرن جداً)
 # =====================================================
 def dms_to_decimal(dms):
+    if pd.isna(dms) or str(dms).strip() == "": return None, None
     try:
-        parts = re.findall(r"(\d+)°(\d+)'(\d+)\"\s*([NSEW])", dms)
+        # يقبل درجات ودقائق وثواني بأي شكل مسافات
+        parts = re.findall(r"(\d+)[°\s](\d+)[\'\s](\d+)\"?\s*([NSEWnsew])", str(dms))
         lat, lon = None, None
         for d, m, s, dirc in parts:
             dec = float(d) + float(m)/60 + float(s)/3600
-            if dirc in ["S", "W"]:
-                dec *= -1
-            if dirc in ["N", "S"]:
-                lat = dec
-            if dirc in ["E", "W"]:
-                lon = dec
+            if dirc.upper() in ["S", "W"]: dec *= -1
+            if dirc.upper() in ["N", "S"]: lat = dec
+            if dirc.upper() in ["E", "W"]: lon = dec
         return lat, lon
-    except:
-        return None, None
+    except: return None, None
 
 # =====================================================
-# LOAD DATA
+# 2. LOAD & CLEAN (The Excel Matcher)
 # =====================================================
 @st.cache_data
 def load_data():
     df = pd.read_csv("Data.csv", low_memory=False)
+    # تنظيف رؤوس الأعمدة
     df.columns = [c.lower().strip() for c in df.columns]
 
-    for col in ["adm", "station_class", "intent", "notice type"]:
+    # تنظيف البيانات الأساسية من أي مسافات أو حروف صغيرة
+    categorical_cols = ["adm", "station_class", "notice type"]
+    for col in categorical_cols:
         if col in df.columns:
             df[col] = df[col].astype(str).str.upper().str.strip()
 
-    if "location" in df.columns:
-        df["lat"], df["lon"] = zip(
-            *df["location"].astype(str).apply(dms_to_decimal)
-        )
+    # تحويل الخدمة (تأمين ضد الـ NaN)
+    df["service"] = df["station_class"].map({"BC": "SOUND", "BT": "TV"}).fillna("UNKNOWN")
 
-    # ✅ Service derivation – DO NOT TOUCH
-    df["service"] = df["station_class"].map({
-        "BC": "SOUND",
-        "BT": "TV"
-    })
+    # معالجة الإحداثيات
+    if "location" in df.columns:
+        coords = df["location"].apply(dms_to_decimal)
+        df["lat"] = coords.apply(lambda x: x[0])
+        df["lon"] = coords.apply(lambda x: x[1])
 
     return df
 
 df = load_data()
 
 # =====================================================
-# INTENT & ENTITY EXTRACTION
+# 3. INTELLIGENT EXTRACTION
 # =====================================================
 ADM_MAP = {
     "egy": "EGY", "egypt": "EGY", "مصر": "EGY",
-    "saudi": "ARS", "ksa": "ARS", "السعودية": "ARS"
+    "saudi": "ARS", "ksa": "ARS", "السعودية": "ARS",
+    "emirates": "UAE", "uae": "UAE", "الإمارات": "UAE"
 }
 
-def detect_intent(q):
+def get_entities(q):
     q = q.lower()
-    if "قارن" in q or "compare" in q:
-        return "COMPARE"
-    if "كام" in q or "how many" in q:
-        return "COUNT"
-    return "OVERVIEW"
-
-def extract_adms(q):
-    found = []
-    for k, v in ADM_MAP.items():
-        if k in q.lower():
-            found.append(v)
-    return list(set(found))
-
-def extract_service(q):
-    q = q.lower()
-    if "tv" in q or "تلفزيون" in q:
-        return "TV"
-    if "sound" in q or "radio" in q or "إذاعة" in q:
-        return "SOUND"
-    return None
-
-# ✅ ✅ ✅ CORRECT COUNTING FUNCTION (EXCEL‑MATCHING)
-def count_service(df, adm, service):
-    target_class = "BC" if service == "SOUND" else "BT"
-    return len(
-        df[
-            (df["adm"] == adm) &
-            (df["station_class"] == target_class)
-        ]
-    )
+    found_adms = [v for k, v in ADM_MAP.items() if k in q]
+    
+    service = None
+    if any(x in q for x in ["tv", "تلفزيون", "مرئي"]): service = "TV"
+    elif any(x in q for x in ["sound", "radio", "إذاعة", "صوتي"]): service = "SOUND"
+    
+    intent = "OVERVIEW"
+    if any(x in q for x in ["كام", "عدد", "how many"]): intent = "COUNT"
+    elif any(x in q for x in ["قارن", "فرق", "compare"]): intent = "COMPARE"
+    
+    return list(set(found_adms)), service, intent
 
 # =====================================================
-# UI
+# 4. UI & LOGIC
 # =====================================================
 st.title("🗣️ Seshat Engineering Voice Assistant")
+query = st.text_input("🎙️ اسأل عن محطات البث (مصر، السعودية...):")
 
-query = st.text_input(
-    "🎙️ اكتب سؤالك زي ما بتكلم مهندس:",
-    placeholder="مثال: هي مصر عندها كام محطة sound؟"
-)
-
-# =====================================================
-# MAIN LOGIC
-# =====================================================
 if query:
-    intent = detect_intent(query)
-    adms = extract_adms(query)
-    service = extract_service(query)
+    adms, service, intent = get_entities(query)
+    
+    # الفلترة (Single Source of Truth)
+    f_df = df.copy()
+    if adms: f_df = f_df[f_df["adm"].isin(adms)]
+    if service: f_df = f_df[f_df["service"] == service]
 
-    # ✅ single source of truth
-    result_df = df.copy()
-
-    if adms:
-        result_df = result_df[result_df["adm"].isin(adms)]
-
-    if service:
-        result_df = result_df[result_df["service"] == service]
-
-    # ================= VOICE RESPONSE =================
-    if intent == "COUNT" and adms and service:
-        parts = []
-        for adm in adms:
-            cnt = count_service(df, adm, service)
-            parts.append(f"{adm} عندها {cnt}")
-        response_text = "، ".join(parts) + f" محطة {service.lower()}."
-
-    elif intent == "COMPARE" and len(adms) == 2 and service:
-        a, b = adms
-        ca = count_service(df, a, service)
-        cb = count_service(df, b, service)
-        response_text = (
-            f"مقارنة {service.lower()}: "
-            f"{a} عندها {ca} محطة، "
-            f"بينما {b} عندها {cb} محطة."
-        )
-
+    # بناء الرد (Logic سليم 100%)
+    if intent == "COUNT" and adms:
+        results = []
+        for a in adms:
+            count = len(f_df[f_df["adm"] == a])
+            results.append(f"{a} فيها {count}")
+        response = " و ".join(results) + f" محطة {service if service else ''}."
+    
+    elif intent == "COMPARE" and len(adms) >= 2:
+        results = [f"{a} ({len(f_df[f_df['adm'] == a])})" for a in adms]
+        response = "المقارنة كالآتي: " + " مقابل ".join(results)
+    
     else:
-        response_text = f"إجمالي المحطات المختارة {len(result_df)}."
+        response = f"إجمالي المحطات المفلترة هو {len(f_df)} محطة."
 
-    # ================= AUDIO =================
+    # الصوت
+    st.success(response)
     try:
-        audio = io.BytesIO()
-        gTTS(response_text, lang="ar").write_to_fp(audio)
-        st.audio(audio.getvalue())
-    except:
-        st.warning("Voice synthesis failed")
+        tts = gTTS(response, lang="ar")
+        audio_data = io.BytesIO()
+        tts.write_to_fp(audio_data)
+        st.audio(audio_data.getvalue())
+    except: st.error("Voice Error")
 
-    st.success(response_text)
-
-    # ================= VISUAL CONTEXT =================
-    st.subheader("📊 Visual Context")
-
+    # الرسوم البيانية (Contextual)
     col1, col2 = st.columns(2)
     with col1:
-        st.bar_chart(result_df["service"].value_counts())
-
+        st.write("### توزيع الخدمات")
+        st.bar_chart(f_df["service"].value_counts())
     with col2:
-        if "notice type" in result_df.columns:
-            st.bar_chart(result_df["notice type"].value_counts())
+        st.write("### حالات الإخطار (Notice Type)")
+        st.bar_chart(f_df["notice type"].value_counts())
 
-    # ================= MAP =================
-    map_df = result_df.dropna(subset=["lat", "lon"])
-
+    # الخريطة الحرارية
+    map_df = f_df.dropna(subset=["lat", "lon"])
     if not map_df.empty:
-        st.subheader("🔥 Geographic Density")
-        m = folium.Map(
-            location=[map_df["lat"].mean(), map_df["lon"].mean()],
-            zoom_start=5
-        )
-        HeatMap(map_df[["lat", "lon"]].values.tolist(), radius=25).add_to(m)
-        st_folium(m, width=1100, height=550)
+        st.write("### 🔥 كثافة التوزيع الجغرافي")
+        m = folium.Map(location=[map_df["lat"].mean(), map_df["lon"].mean()], zoom_start=5)
+        HeatMap(map_df[["lat", "lon"]].values.tolist(), radius=15).add_to(m)
+        st_folium(m, width=1100, height=500, key="geo_map")
