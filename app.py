@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import folium
+from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from gtts import gTTS
 import io
@@ -9,20 +10,18 @@ import re
 st.set_page_config(page_title="Seshat Engineering Hub", layout="wide")
 
 # ---------- DMS → Decimal ----------
-def dms_to_decimal(dms_str):
+def dms_to_decimal(dms):
     try:
-        parts = re.findall(r"(\d+)°(\d+)'(\d+)\"\s*([NSEW])", dms_str)
+        parts = re.findall(r"(\d+)°(\d+)'(\d+)\"\s*([NSEW])", dms)
         lat, lon = None, None
-
-        for d, m, s, direction in parts:
-            decimal = float(d) + float(m)/60 + float(s)/3600
-            if direction in ["S", "W"]:
-                decimal *= -1
-            if direction in ["N", "S"]:
-                lat = decimal
-            if direction in ["E", "W"]:
-                lon = decimal
-
+        for d, m, s, dirc in parts:
+            dec = float(d) + float(m)/60 + float(s)/3600
+            if dirc in ["S", "W"]:
+                dec *= -1
+            if dirc in ["N", "S"]:
+                lat = dec
+            if dirc in ["E", "W"]:
+                lon = dec
         return lat, lon
     except:
         return None, None
@@ -33,7 +32,7 @@ def load_data():
     df = pd.read_csv("Data.csv", low_memory=False)
     df.columns = [c.lower().strip() for c in df.columns]
 
-    for col in ["adm", "station_class", "intent", "notice type", "geo area"]:
+    for col in ["adm", "station_class", "intent", "notice type"]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.upper().str.strip()
 
@@ -42,74 +41,73 @@ def load_data():
             *df["location"].astype(str).apply(dms_to_decimal)
         )
 
+    # ✅ Service Type Derivation
+    df["service"] = df["station_class"].map({
+        "BC": "SOUND",
+        "BT": "TV"
+    })
+
     return df
 
 df = load_data()
 
-# ---------- UI ----------
+# ---------- SIDEBAR ----------
+st.sidebar.title("🎚 Dashboard Filters")
+adm_list = sorted(df["adm"].dropna().unique())
+selected_adm = st.sidebar.multiselect(
+    "Select ADM",
+    adm_list,
+    default=["EGY"] if "EGY" in adm_list else adm_list[:1]
+)
+
+f_df = df[df["adm"].isin(selected_adm)]
+
+# ---------- MAIN ----------
 st.title("📡 Seshat Engineering Hub")
-query = st.text_input("🎙️ Ask like an engineer", placeholder="radio stations in egypt")
 
-if query:
-    q = query.lower()
-    f_df = df.copy()
+# KPIs
+c1, c2, c3 = st.columns(3)
+c1.metric("ADM Selected", ", ".join(selected_adm))
+c2.metric("Total Stations", len(f_df))
+c3.metric("Service Types", f_df["service"].nunique())
 
-    if "egy" in q or "masr" in q or "مصر" in q:
-        f_df = f_df[f_df["adm"] == "EGY"]
-        country_name = "مصر"
-    else:
-        country_name = "القاعدة كاملة"
+# ---------- SERVICE SPLIT ----------
+st.subheader("🔀 Service Discrimination")
+service_counts = f_df["service"].value_counts()
+st.bar_chart(service_counts)
 
-    service = "محطات"
+# ---------- NOTICE TYPE ----------
+st.subheader("📜 Notice Type Distribution")
+st.bar_chart(f_df["notice type"].value_counts())
 
-    if "radio" in q or "sound" in q or "إذاعة" in q or "bc" in q:
-        f_df = f_df[f_df["station_class"] == "BC"]
-        service = "إذاعات"
-    elif "tv" in q or "bt" in q or "تلفزيون" in q:
-        f_df = f_df[f_df["station_class"] == "BT"]
-        service = "تلفزيون"
+# ---------- VOICE SUMMARY ----------
+if len(selected_adm) == 1:
+    adm = selected_adm[0]
+    tv = len(f_df[f_df["service"] == "TV"])
+    sound = len(f_df[f_df["service"] == "SOUND"])
+    voice_text = f"إدارة {adm} عندها {tv} محطة تلفزيون و {sound} محطة إذاعة."
+else:
+    voice_text = (
+        f"تم اختيار {len(selected_adm)} إدارات للمقارنة. "
+        f"إجمالي المحطات {len(f_df)}."
+    )
 
-    final_count = len(f_df)
+try:
+    audio = io.BytesIO()
+    gTTS(voice_text, lang="ar").write_to_fp(audio)
+    st.audio(audio.getvalue())
+except:
+    pass
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Stations", final_count)
-    c2.metric("Radio (BC)", len(f_df[f_df["station_class"] == "BC"]))
-    c3.metric("TV (BT)", len(f_df[f_df["station_class"] == "BT"]))
-
-    if final_count == 0:
-        voice_text = "مفيش ولا محطة مطابقة للطلب."
-    elif final_count < 100:
-        voice_text = f"العدد {final_count} {service} في {country_name}."
-    else:
-        voice_text = f"فيه حوالي {final_count} {service} في {country_name}."
-
-    try:
-        tts = gTTS(voice_text, lang="ar")
-        audio = io.BytesIO()
-        tts.write_to_fp(audio)
-        st.audio(audio.getvalue())
-    except:
-        st.warning("Voice failed.")
-
-    st.subheader("📊 Station Class Distribution")
-    st.bar_chart(f_df["station_class"].value_counts())
-
-    map_df = f_df.dropna(subset=["lat", "lon"]).head(300)
-
-    if not map_df.empty:
-        m = folium.Map(
-            location=[map_df["lat"].mean(), map_df["lon"].mean()],
-            zoom_start=6
-        )
-
-        for _, r in map_df.iterrows():
-            folium.CircleMarker(
-                location=[r["lat"], r["lon"]],
-                radius=4,
-                color="blue" if r["station_class"] == "BC" else "red",
-                fill=True
-            ).add_to(m)
-
-        st_folium(m, width=1000, height=500, key="map")
-    else:
-        st.info("No valid location data.")
+# ---------- MAP / HEATMAP ----------
+map_df = f_df.dropna(subset=["lat", "lon"])
+if not map_df.empty:
+    st.subheader("🔥 Station Density (Heatmap)")
+    m = folium.Map(
+        location=[map_df["lat"].mean(), map_df["lon"].mean()],
+        zoom_start=5
+    )
+    HeatMap(map_df[["lat", "lon"]].values.tolist()).add_to(m)
+    st_folium(m, width=1100, height=550)
+else:
+    st.info("No location data available.")
