@@ -7,82 +7,86 @@ import re
 from gtts import gTTS
 import io
 
-st.set_page_config(page_title="Seshat AI: Final Core", layout="wide")
+st.set_page_config(page_title="Seshat AI: Ultra Core", layout="wide")
 
-# --- 1. معالجة البيانات (النسخة الآمنة من الـ AttributeError) ---
+# --- 1. إصلاح معالجة البيانات (السطر 38 النهائي) ---
 @st.cache_data
-def load_data_safe():
+def load_data_final():
     try:
         df = pd.read_csv("Data.csv", low_memory=False)
         df.columns = [c.lower().strip() for c in df.columns]
-        # حل مشكلة السطر 38 اللي ظهرت في الـ Logs
+        # الحل الجذري للـ AttributeError
         for col in ['adm', 'station_class', 'notice type']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.upper().str.strip()
         return df
     except: return pd.DataFrame()
 
-df = load_data_safe()
+df = load_data_final()
 
-# --- 2. محرك الـ AI (توليد الرد بالعامية المصرية) ---
-def get_ai_speech_response(count, country, service, query):
+# --- 2. محرك الـ AI (دعم الرد المزدوج والعامية) ---
+def get_combined_response(counts, country, services, query):
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('models/gemini-1.5-flash')
-        # الـ Prompt ده هو اللي بيخليه يتكلم مصري عفوياً
+        
+        details = ", ".join([f"{count} {svc}" for svc, count in counts.items()])
         prompt = f"""
-        Answer as an Egyptian Telecom Engineer. 
-        Context: Found {count} {service} stations for {country}. 
-        Question: "{query}"
-        Task: Respond in natural Egyptian Ammiya. Focus on the figures. 
-        Be concise and helpful. Don't use robotic templates.
+        Respond as an Egyptian Telecom Engineer in Ammiya.
+        Data: For {country}, we found: {details}.
+        User Question: "{query}"
+        Instruction: Provide a natural, friendly response in Egyptian Arabic including all found numbers. 
+        Focus on technical accuracy.
         """
         response_text = model.generate_content(prompt).text
         
-        # تحويل الرد لصوت فوراً
+        # تحويل الصوت
         tts = gTTS(text=response_text, lang='ar')
         audio_fp = io.BytesIO()
         tts.write_to_fp(audio_fp)
         return response_text, audio_fp.getvalue()
     except:
-        return f"يا هندسة فيه {count} محطة {service} في {country}.", None
+        return "حصل مشكلة في توليد الرد، بس الداتا قدامك اهي.", None
 
-# --- 3. واجهة التحكم ---
-st.title("📡 Seshat AI: Precision Spectrum Dashboard")
-query = st.text_input("Engineering Query:", placeholder="مثلاً: مصر فيها كام محطة صوت؟")
+# --- 3. واجهة التحكم الذكية ---
+st.title("📡 Seshat AI: Spectrum Intelligence Dashboard")
+query = st.text_input("Engineering Query:", placeholder="مثلاً: مصر فيها كام محطة إذاعة وتلفزيون؟")
 
 if st.button("🚀 Analyze & Speak") and query:
     q = query.lower()
     
-    # فلترة البيانات (Python Logic)
+    # تحديد الدولة
     target = "EGY" if any(x in q for x in ["egy", "masr", "مصر"]) else "ISR" if any(x in q for x in ["isr", "israel"]) else "GLOBAL"
     f_df = df[df['adm'] == target] if target != "GLOBAL" else df
     
-    is_tv = any(x in q for x in ["tv", "bt", "تلفزيون"])
-    f_df = f_df[f_df['station_class'] == ('BT' if is_tv else 'BC')]
+    # دعم البحث المزدوج (TV & Sound)
+    counts = {}
+    if any(x in q for x in ["tv", "تلفزيون", "bt"]):
+        counts["Television"] = len(f_df[f_df['station_class'] == 'BT'])
+    if any(x in q for x in ["sound", "صوت", "إذاعة", "bc"]):
+        counts["Sound Broadcasting"] = len(f_df[f_df['station_class'] == 'BC'])
     
-    # نداء الـ AI لتوليد الرد الصوتي
-    with st.spinner("جاري صياغة الرد المصري..."):
-        ai_msg, ai_audio = get_ai_speech_response(len(f_df), target, "TV" if is_tv else "Sound", query)
+    # لو مسألش عن حاجة محددة، نعرض كله
+    if not counts:
+        counts = {"Total Records": len(f_df)}
+
+    with st.spinner("بيجهز الرد المصري..."):
+        msg, audio = get_combined_response(counts, target, counts.keys(), query)
         
-        # تخزين النتائج لتفادي الـ KeyError
-        st.session_state.final_res = {
-            'msg': ai_msg, 'audio': ai_audio, 'count': len(f_df), 
-            'adm': target, 'df': f_df
+        st.session_state.ultra_res = {
+            'msg': msg, 'audio': audio, 'counts': counts, 'adm': target
         }
 
-# --- 4. العرض الصوتي والبصري ---
-if 'final_res' in st.session_state:
-    res = st.session_state.final_res
+# --- 4. العرض الصوتي والبصري المستقر ---
+if 'ultra_res' in st.session_state:
+    res = st.session_state.ultra_res
     
-    # تشغيل الصوت تلقائياً (دي اللي كانت مختفية)
     if res['audio']:
         st.audio(res['audio'], format='audio/mp3')
     
-    st.info(res['msg'])
-    st.metric(f"Total Stations in {res['adm']}", res['count'])
+    st.success(res['msg'])
     
-    # عرض الخريطة (فقط لو فيه داتا)
-    if not res['df'].empty:
-        # هنا بنحط كود الـ Map اللي شغال معاك تمام
-        pass
+    # عرض العدادات لكل نوع
+    cols = st.columns(len(res['counts']))
+    for i, (svc, count) in enumerate(res['counts'].items()):
+        cols[i].metric(label=svc, value=count)
