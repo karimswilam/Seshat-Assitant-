@@ -2,89 +2,70 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-import google.generativeai as genai
-import re
 from gtts import gTTS
 import io
 
-st.set_page_config(page_title="Seshat AI: Mission Critical", layout="wide")
+st.set_page_config(page_title="Seshat AI: Core Engine", layout="wide")
 
-# --- 1. الذاكرة الفولاذية (تأمين الـ Session State) ---
-if 'voice_response' not in st.session_state: st.session_state.voice_response = None
-if 'text_msg' not in st.session_state: st.session_state.text_msg = ""
-if 'map_data' not in st.session_state: st.session_state.map_data = pd.DataFrame()
-
-# --- 2. تحميل البيانات (حل السطر 38 للأبد) ---
+# --- 1. محرك البيانات (Pandas Only - No Gemini here) ---
 @st.cache_data
-def load_data_rock_solid():
+def load_and_clean_data():
     try:
+        # تحميل الملف مباشرة وبسرعة
         df = pd.read_csv("Data.csv", low_memory=False)
         df.columns = [c.lower().strip() for c in df.columns]
-        # استخدام .apply لضمان عدم حدوث AttributeError
+        # حل مشكلة الـ AttributeError نهائياً (السطر 38)
         for col in ['adm', 'station_class', 'notice type']:
             if col in df.columns:
-                df[col] = df[col].fillna('UNKNOWN').apply(lambda x: str(x).upper().strip())
+                df[col] = df[col].astype(str).str.upper().str.strip()
         return df
-    except: return pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
-df = load_data_rock_solid()
+df = load_and_clean_data()
 
-# --- 3. محرك الـ AI (مهمته الصوت فقط) ---
-def build_engineer_response(results_dict, user_query):
-    try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
-        prompt = f"Engineer! Local Data: {results_dict}. User: {user_query}. Respond in natural Egyptian Ammiya. Be concise and professional."
-        response = model.generate_content(prompt).text
-        
-        # توليد الصوت
-        tts = gTTS(text=response, lang='ar')
-        audio_io = io.BytesIO()
-        tts.write_to_fp(audio_io)
-        return response, audio_io.getvalue()
-    except: return "الداتا جاهزة يا هندسة بس فيه ضغط على السيرفر.", None
+# --- 2. واجهة المستخدم ---
+st.title("📡 Seshat Precision Dashboard")
+query = st.text_input("Engineering Command:", placeholder="e.g., مصر فيها كام محطة صوت؟")
 
-# --- 4. واجهة التشغيل ---
-st.title("📡 Seshat AI: Spectrum Intelligence")
-query = st.text_input("Engineering Command:", placeholder="مثلاً: مصر فيها كام محطة صوت؟")
-
-if st.button("🚀 Run System Analysis") and query:
+if st.button("🚀 Run Analysis") and query:
     q = query.lower()
     
-    # فلترة محلية صارمة (Local Filtering)
-    adm_target = "EGY" if any(x in q for x in ["egy", "masr", "مصر"]) else "ISR" if any(x in q for x in ["isr", "israel"]) else "GLOBAL"
-    filtered = df[df['adm'] == adm_target] if adm_target != "GLOBAL" else df
+    # فلترة البيانات برمجياً (مش بالذكاء الاصطناعي)
+    target = "EGY" if any(x in q for x in ["egy", "masr", "مصر"]) else "ISR" if any(x in q for x in ["isr", "israel"]) else None
     
-    # منطق البحث المتعدد
-    stats = {}
-    if any(x in q for x in ["tv", "تلفزيون", "bt"]):
-        stats["Television"] = len(filtered[filtered['station_class'] == 'BT'])
-    if any(x in q for x in ["sound", "صوت", "إذاعة", "bc"]):
-        stats["Sound"] = len(filtered[filtered['station_class'] == 'BC'])
+    # تنفيذ الفلترة
+    results_df = df.copy()
+    if target:
+        results_df = results_df[results_df['adm'] == target]
     
-    if not stats: stats["Total Stations"] = len(filtered)
+    # تحديد نوع الخدمة (Sound vs TV)
+    is_tv = any(x in q for x in ["tv", "تلفزيون", "bt"])
+    is_sound = any(x in q for x in ["sound", "صوت", "إذاعة", "bc"])
+    
+    if is_tv: results_df = results_df[results_df['station_class'] == 'BT']
+    if is_sound: results_df = results_df[results_df['station_class'] == 'BC']
 
-    # تشغيل الـ AI للصوت فقط
-    with st.spinner("Synchronizing with Gemini..."):
-        msg, audio = build_engineer_response(stats, query)
-        st.session_state.text_msg = msg
-        st.session_state.voice_response = audio
-        st.session_state.map_data = filtered.head(100) # عينة للخريطة
-
-# --- 5. مرحلة العرض (مستقلة تماماً عن الـ Loop) ---
-if st.session_state.text_msg:
-    if st.session_state.voice_response:
-        st.audio(st.session_state.voice_response, format='audio/mp3')
+    # --- 3. العرض اللحظي ---
+    count = len(results_df)
+    st.metric(label=f"Total Records Found ({target if target else 'Global'})", value=count)
     
-    st.info(st.session_state.text_msg)
-    
-    # عرض الأرقام
-    c1, c2 = st.columns(2)
-    c1.metric("Selected Admin", adm_target if 'adm_target' in locals() else "Global")
-    c2.write(stats if 'stats' in locals() else "")
+    # عرض الخريطة فوراً
+    if count > 0 and 'lat' in results_df.columns and 'lon' in results_df.columns:
+        st.subheader("📍 Geospatial Trace")
+        # تنظيف الإحداثيات
+        map_df = results_df.dropna(subset=['lat', 'lon'])
+        if not map_df.empty:
+            m = folium.Map(location=[map_df['lat'].mean(), map_df['lon'].mean()], zoom_start=5)
+            for _, row in map_df.head(100).iterrows():
+                folium.CircleMarker([row['lat'], row['lon']], radius=5, color='cyan', fill=True).add_to(m)
+            st_folium(m, width=700, height=450, key="main_map")
+    else:
+        st.warning("No coordinates found for this selection.")
 
-    # الخريطة (لو فيه إحداثيات)
-    if not st.session_state.map_data.empty and 'lat' in st.session_state.map_data.columns:
-        m = folium.Map(location=[26, 30], zoom_start=5)
-        # كود إضافة الـ Markers هنا
-        st_folium(m, width=800, height=400, key="stable_map")
+    # --- 4. الصوت (باستخدام gTTS البسيط - أسرع وأضمن) ---
+    response_text = f"يا هندسة، لقينا {count} محطة {'تلفزيون' if is_tv else 'إذاعة' if is_sound else ''} لـ {target if target else 'الكل'}."
+    tts = gTTS(text=response_text, lang='ar')
+    audio_io = io.BytesIO()
+    tts.write_to_fp(audio_io)
+    st.audio(audio_io.getvalue(), format='audio/mp3')
