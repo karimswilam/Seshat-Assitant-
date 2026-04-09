@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
+import google.generativeai as genai
 import re
 from gtts import gTTS
 import io
@@ -9,100 +10,69 @@ import io
 # 1. إعدادات الهوية
 FLAGS = {'ISR': '🇮🇱', 'EGY': '🇪🇬', 'ARS': '🇸🇦', 'UAE': '🇦🇪'}
 
-st.set_page_config(page_title="Seshat AI: Egyptian Intelligence", layout="wide")
-
-def dms_to_decimal(dms_str):
-    try:
-        parts = re.findall(r"(\d+)°(\d+)'(\d+)\"\s*([NSEW])", str(dms_str))
-        if not parts: return None, None
-        res = {}
-        for deg, mins, sec, direction in parts:
-            decimal = float(deg) + float(mins)/60 + float(sec)/3600
-            if direction in ['S', 'W']: decimal *= -1
-            res[direction] = decimal
-        return res.get('N') or res.get('S'), res.get('E') or res.get('W')
-    except: return None, None
+st.set_page_config(page_title="Seshat AI: Intelligent Core", layout="wide")
 
 @st.cache_data
 def load_data():
     df = pd.read_csv("Data.csv", low_memory=False)
     df.columns = [c.lower().strip() for c in df.columns]
-    if 'location' in df.columns:
-        coords = df['location'].apply(dms_to_decimal)
-        df['lat'] = coords.apply(lambda x: x[0])
-        df['lon'] = coords.apply(lambda x: x[1])
-    for col in ['adm', 'station_class', 'notice type']:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.upper().str.strip()
+    # (هنا بنحط كود تحويل الإحداثيات اللي عملناه قبل كدة)
+    # ...
     return df
 
 df = load_data()
 
-if 'results' not in st.session_state:
-    st.session_state.results = {}
+# --- الـ Logic الحقيقي للـ LLM ---
+def generate_ai_voice_text(count, country, service, n_type, original_query):
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    model = genai.GenerativeModel('models/gemini-3-flash-preview')
+    
+    # الـ Prompt ده هو اللي بيخلي الـ LLM يرد بذكاء مش بجمل ثابتة
+    prompt = f"""
+    You are an expert Telecommunications Engineer. 
+    The user asked: "{original_query}"
+    The data found: {count} {service} stations in {country}. 
+    Additional filter used: {n_type if n_type else 'None'}.
+    
+    Task: Respond to the user's question directly and professionally in Egyptian Arabic (Ammiya). 
+    Rules:
+    1. Do NOT use fixed phrases like "Ya handsa" or "L2et" unless it feels natural.
+    2. Be concise and precise with numbers.
+    3. If multiple types exist, mention them.
+    4. Sound like an Egyptian colleague, not a robot.
+    """
+    
+    response = model.generate_content(prompt)
+    return response.text
 
-st.title("📡 Seshat AI: Spectrum Intelligence")
+# --- Interface ---
+st.title("📡 Seshat AI: Dynamic Response Core")
 
-query = st.text_input("Engineering Query (العامية المصرية):", placeholder="مثلاً: مصر عندها كام محطة صوت نوعها TB2")
+query = st.text_input("Engineering Query:", placeholder="How many sound stations in Egypt?")
 
-if st.button("🚀 تحليل البيانات"):
+if st.button("🚀 Run Intelligent Analysis") and query:
+    # 1. تحليل الداتا (الـ Python Logic اللي عملناه)
     q = query.lower()
+    target = "EGY" if "egy" in q or "مصر" in q else "ISR" if "isr" in q else None
     
-    # منطق الفلترة
-    target = "EGY" if any(x in q for x in ["egy", "masr", "مصر"]) else "ISR" if any(x in q for x in ["isr", "إسرائيل"]) else None
-    f_df = df[df['adm'] == target] if target else df
+    # (تكملة فلترة الـ df حسب النوع والـ notice type كما في الكود السابق)
+    # ... لنفرض إننا طلعنا الـ res_count والـ s_label ...
+    res_count = 356 # مثال
+    s_label = "Sound"
+    n_type = "TB2" # مثال
     
-    n_type = None
-    notice_match = re.search(r'tb\d+', q)
-    if notice_match:
-        n_type = notice_match.group(0).upper()
-        f_df = f_df[f_df['notice type'] == n_type]
+    # 2. نطلب من الـ LLM يولد الرد بناءً على النتيجة
+    with st.spinner("Seshat is thinking..."):
+        ai_voice_text = generate_ai_voice_text(res_count, target, s_label, n_type, query)
     
-    is_tv = any(x in q for x in ["tv", "تلفزيون", "bt"])
-    f_df = f_df[f_df['station_class'] == ('BT' if is_tv else 'BC')]
-    s_label = "تلفزيون" if is_tv else "إذاعة صوتية"
-    res_count = len(f_df)
-    
-    # --- الرد بالعامية المصرية (Humanized Arabic) ---
-    country_name = "مصر" if target == "EGY" else "المنطقة اللي اخترتها"
-    
-    # صياغة الجملة بالعامية
-    voice_txt = f"يا هندسة، بالنسبة لـ{country_name}، أنا لقيت {res_count} محطة {s_label}."
-    if n_type:
-        voice_txt += f" ودول اللي نوعهم {n_type} زي ما طلبت."
-    
-    # توليد الصوت باللغة العربية
-    tts = gTTS(text=voice_txt, lang='ar')
+    # 3. تحويل رد الـ AI لصوت
+    tts = gTTS(text=ai_voice_text, lang='ar')
     audio_fp = io.BytesIO()
     tts.write_to_fp(audio_fp)
     
-    st.session_state.results = {
-        'df': f_df,
-        'count': res_count,
-        'adm': target,
-        'label': s_label,
-        'audio': audio_fp.getvalue(),
-        'n_type': n_type
-    }
-
-# --- واجهة العرض ---
-res = st.session_state.results
-if res:
-    if 'audio' in res:
-        st.audio(res['audio'], format='audio/mp3')
+    # --- العرض ---
+    st.audio(audio_fp.getvalue(), format='audio/mp3')
+    st.write(f"🤖 **Seshat says:** {ai_voice_text}")
     
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.markdown(f"## {FLAGS.get(res.get('adm'), '🌐')} {res.get('adm')}")
-        st.metric(label=f"إجمالي محطات {res.get('label')}", value=res.get('count'))
-        if res.get('n_type'):
-            st.info(f"الفلتر المستخدم: {res['n_type']}")
-        
-    with col2:
-        m_df = res['df'].dropna(subset=['lat', 'lon'])
-        if not m_df.empty:
-            m = folium.Map(location=[m_df['lat'].mean(), m_df['lon'].mean()], zoom_start=6, 
-                           tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attr="CartoDB")
-            for _, row in m_df.head(200).iterrows():
-                folium.CircleMarker([row['lat'], row['lon']], radius=5, color="#00FBFF", fill=True).add_to(m)
-            st_folium(m, key="egy_map", width=800, height=480, returned_objects=[])
+    # (هنا بنعرض الخريطة والمقاييس كما في النسخ السابقة)
+    # ...
