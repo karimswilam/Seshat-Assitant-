@@ -4,99 +4,97 @@ import folium
 from streamlit_folium import st_folium
 from gtts import gTTS
 import io
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Seshat Engineering Hub", layout="wide")
 
-# --- 1. تحميل الداتا (إصلاح السطر 38 للأبد) ---
+# ----------------- LOAD DATA -----------------
 @st.cache_data
-def load_data_final():
-    try:
-        # قراءة الملف بـ low_memory لسرعة الأداء
-        df = pd.read_csv("Data.csv", low_memory=False)
-        df.columns = [c.lower().strip() for c in df.columns]
-        
-        # التأمين ضد AttributeError: تحويل كل خلية لنص أولاً
-        for col in ['adm', 'station_class', 'notice type']:
-            if col in df.columns:
-                df[col] = df[col].map(str).str.upper().str.strip()
-        
-        # تحويل الإحداثيات لأرقام
-        if 'lat' in df.columns and 'lon' in df.columns:
-            df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
-            df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
-            
-        return df
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return pd.DataFrame()
+def load_data():
+    df = pd.read_csv("Data.csv", low_memory=False)
+    df.columns = [c.lower().strip() for c in df.columns]
 
-df = load_data_final()
+    for col in ['adm', 'station_class', 'intent', 'notice type', 'geo area']:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.upper().str.strip()
 
-# --- 2. واجهة البحث الفوري ---
+    if 'lat' in df.columns and 'lon' in df.columns:
+        df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
+        df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
+
+    return df
+
+df = load_data()
+
+# ----------------- UI -----------------
 st.title("📡 Seshat Engineering Hub")
-query = st.text_input("Engineering Query (e.g., masr sound):", placeholder="Enter your command here...")
+query = st.text_input("🎙️ Ask like an engineer:", placeholder="e.g. radio stations in egypt")
 
 if query:
     q = query.lower()
-    
-    # فلترة مصر (Local Logic)
-    target_adm = "EGY" if any(x in q for x in ["egy", "masr", "مصر"]) else None
-    
-    # تنفيذ الفلترة على الداتا
-    if target_adm:
-        f_df = df[df['adm'] == target_adm]
-    else:
-        f_df = df
-        
-    # تحديد نوع الخدمة (Sound vs TV)
-    svc = "بث"
-    if any(x in q for x in ["tv", "تلفزيون", "bt"]):
-        f_df = f_df[f_df['station_class'] == 'BT']
-        svc = "تلفزيون"
-    elif any(x in q for x in ["sound", "صوت", "إذاعة", "bc"]):
-        f_df = f_df[f_df['station_class'] == 'BC']
-        svc = "إذاعة"
+    f_df = df.copy()
 
-    # النتيجة النهائية
+    # -------- Country --------
+    if any(x in q for x in ["egy", "masr", "مصر"]):
+        f_df = f_df[f_df['adm'] == 'EGY']
+        country_name = "مصر"
+    else:
+        country_name = "القاعدة كاملة"
+
+    # -------- Service --------
+    service = "محطات"
+    if any(x in q for x in ["radio", "sound", "إذاعة", "bc"]):
+        f_df = f_df[f_df['station_class'] == 'BC']
+        service = "إذاعات"
+    elif any(x in q for x in ["tv", "television", "bt", "تلفزيون"]):
+        f_df = f_df[f_df['station_class'] == 'BT']
+        service = "تلفزيون"
+
     final_count = len(f_df)
 
-    # --- 3. العرض (النتائج + الصوت) ---
-    st.subheader(f"Total {svc} Stations: {final_count}")
-    
-    # صوت gTTS سريع ومستقر (مش محتاج Gemini)
-    voice_text = f"يا هندسة، الداتا بتقول إن فيه {final_count} محطة {svc} في {'مصر' if target_adm else 'القاعدة'}."
+    # ---------------- KPIs ----------------
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Stations", final_count)
+    col2.metric("Radio (BC)", len(f_df[f_df['station_class'] == 'BC']))
+    col3.metric("TV (BT)", len(f_df[f_df['station_class'] == 'BT']))
+
+    # ---------------- Voice Logic ----------------
+    if final_count == 0:
+        voice_text = "مفيش ولا محطة مطابقة للطلب ده."
+    elif final_count < 10:
+        voice_text = f"النتيجة قليلة شوية، حوالي {final_count} {service} في {country_name}."
+    elif final_count < 100:
+        voice_text = f"العدد متوسط، تقريبًا {final_count} {service} في {country_name}."
+    else:
+        voice_text = f"العدد كبير، حوالي {final_count} {service} منتشرين في {country_name}."
+
     try:
         tts = gTTS(text=voice_text, lang='ar')
-        audio_io = io.BytesIO()
-        tts.write_to_fp(audio_io)
-        st.audio(audio_io.getvalue(), format='audio/mp3')
+        audio = io.BytesIO()
+        tts.write_to_fp(audio)
+        st.audio(audio.getvalue(), format="audio/mp3")
     except:
-        st.warning("الصوت فيه مشكلة، بس الأرقام اهي.")
+        st.warning("⚠️ Voice failed, text result shown only.")
 
-    # --- 4. الخريطة الثابتة ---
-    if final_count > 0:
-        # فلترة الصفوف اللي فيها إحداثيات بس
-        map_df = f_df.dropna(subset=['lat', 'lon'])
-        
-        if not map_df.empty:
-            st.info(f"Showing {min(len(map_df), 500)} locations on map.")
-            
-            # سنتر الخريطة
-            m = folium.Map(location=[map_df['lat'].mean(), map_df['lon'].mean()], zoom_start=6)
-            
-            # إضافة الـ Markers (أول 500 للسرعة)
-            for _, row in map_df.head(500).iterrows():
-                folium.CircleMarker(
-                    location=[row['lat'], row['lon']],
-                    radius=4,
-                    color='blue' if svc=="إذاعة" else 'red',
-                    fill=True,
-                    popup=f"ID: {row.get('id', 'N/A')}"
-                ).add_to(m)
-            
-            # عرض الخريطة بـ Key ثابت عشان متهنجش
-            st_folium(m, width=900, height=500, key="map_stable")
-        else:
-            st.warning("No geospatial data found for these stations.")
-    else:
-        st.error("No stations found matching your query.")
+    st.subheader("📊 Station Class Distribution")
+    fig, ax = plt.subplots()
+    f_df['station_class'].value_counts().plot(kind='bar', ax=ax)
+    st.pyplot(fig)
+
+    # ---------------- MAP ----------------
+    map_df = f_df.dropna(subset=['lat', 'lon']).head(500)
+    if not map_df.empty:
+        m = folium.Map(
+            location=[map_df['lat'].mean(), map_df['lon'].mean()],
+            zoom_start=6
+        )
+
+        for _, r in map_df.iterrows():
+            folium.CircleMarker(
+                location=[r['lat'], r['lon']],
+                radius=4,
+                color='blue' if r['station_class'] == 'BC' else 'red',
+                fill=True
+            ).add_to(m)
+
+        st_folium(m, width=1000, height=500)
