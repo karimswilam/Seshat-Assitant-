@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 
-# --- القاموس الهندسي الشامل ---
+# --- 1. القاموس الهندسي (العقل المدبر) ---
 SERVICE_KNOWLEDGE = {
     'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
     'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
@@ -17,22 +17,17 @@ NOTICE_MAP = {
     'T01': 'VHF Sound (FM)', 'T02': 'VHF/UHF TV'
 }
 
-st.set_page_config(page_title="Seshat Engineering Hub", layout="wide", page_icon="📡")
+st.set_page_config(page_title="Seshat Engineering Hub", layout="wide")
 st.title("📡 Seshat AI - Hybrid Data Analytics")
 
-# --- منطق الـ Hybrid Loading ---
+# --- 2. منطق التحميل الهجين ---
 @st.cache_data(ttl=600)
 def load_data(uploaded_file, default_path="Data.xlsx"):
     target_file = None
-    
-    # الأول: الأولوية لليوزر لو رفع ملف
     if uploaded_file is not None:
         target_file = uploaded_file
-        st.success("✅ Working with Uploaded File")
-    # ثانياً: لو مفيش رفع، يروح لملف GitHub/Server الأساسي
     elif os.path.exists(default_path):
         target_file = default_path
-        st.info("📂 Working with Default Master File (Data.xlsx)")
     
     if target_file:
         try:
@@ -42,51 +37,50 @@ def load_data(uploaded_file, default_path="Data.xlsx"):
                 if col in df.columns:
                     df[col] = df[col].astype(str).str.strip()
             return df
-        except Exception as e:
-            st.error(f"❌ Error reading file: {e}")
+        except: return pd.DataFrame()
     return pd.DataFrame()
 
-# --- حتة الـ Hybrid اللي كانت "مستخبية" ---
-# رجعناها في نص الشاشة اهي يا هندسة
-uploaded_file = st.file_uploader("📂 Upload new Excel (Optional - Will override default file)", type=["xlsx"])
-
-# تحميل البيانات بناءً على الـ Hybrid Logic
+uploaded_file = st.file_uploader("📂 Upload Excel (Optional)", type=["xlsx"])
 df = load_data(uploaded_file)
 
-# --- محرك الاستعلام ---
+# رسالة حالة البيانات لليوزر
+if not df.empty and uploaded_file is None:
+    st.info("💡 Working with Default Master File (Data.xlsx)")
+
+# --- 3. محرك البحث الذكي (Strict Filter) ---
 if not df.empty:
-    query = st.text_input("💬 اسأل عن البيانات (مثلاً: ksa dab records):")
+    query = st.text_input("💬 اسأل هنا (مثلاً: hya masr 3ndha kam m7ta sound?):")
     
     if query:
         q = query.lower()
         f_df = df.copy()
 
-        # منطق الفلترة (الدولة)
-        countries = {'ARS': ['ars', 'ksa', 'saudi', 'سعودية'], 'EGY': ['egy', 'مصر', 'masr']}
-        for code, terms in countries.items():
-            if any(t in q for t in terms):
-                f_df = f_df[f_df['Adm'] == code]
+        # أ) فلترة الدولة - صارمة جداً
+        if any(w in q for w in ['egy', 'مصر', 'masr']):
+            f_df = f_df[f_df['Adm'] == 'EGY']
+        elif any(w in q for w in ['ars', 'ksa', 'saudi', 'سعودية']):
+            f_df = f_df[f_df['Adm'] == 'ARS']
 
-        # منطق الفلترة (نوع الخدمة)
-        if 'dab' in q:
+        # ب) فلتر النوع (Sound vs TV vs DAB)
+        # لو سأل عن sound يبقى عايز كل حاجة إذاعية (FM + AM + DAB)
+        if 'sound' in q or 'صوت' in q or 'إذاعة' in q:
+            sound_codes = SERVICE_KNOWLEDGE['DAB'] + SERVICE_KNOWLEDGE['FM'] + SERVICE_KNOWLEDGE['AM']
+            f_df = f_df[f_df['Notice Type'].isin(sound_codes)]
+        elif 'dab' in q:
             f_df = f_df[f_df['Notice Type'].isin(SERVICE_KNOWLEDGE['DAB'])]
-        elif 'tv' in q:
+        elif 'tv' in q or 'تلفزيون' in q:
             f_df = f_df[f_df['Notice Type'].isin(SERVICE_KNOWLEDGE['TV'])]
 
-        # عرض النتائج
-        is_count = any(w in q for w in ['kam', '3dd', 'count', 'total', 'عدد'])
+        # ج) النتيجة
         res_count = len(f_df)
-
-        if is_count:
-            st.metric("📊 Result Count", f"{res_count} Records")
-            if res_count > 0:
-                actual_types = f_df['Notice Type'].unique()
-                st.info(f"Notice Types found: {', '.join([f'{t} ({NOTICE_MAP.get(t, 'N/A')})' for t in actual_types])}")
-        else:
-            st.success(f"🤖 Found {res_count} records:")
+        st.metric("📊 Result Count", f"{res_count} Records")
+        
+        if res_count > 0:
+            # منع التأليف: هات اللي موجود فعلاً في الداتا المفلترة
+            actual_types = f_df['Notice Type'].unique()
+            type_desc = [f"{t} ({NOTICE_MAP.get(t, 'Other')})" for t in actual_types]
+            st.success(f"✅ Found types: {', '.join(type_desc)}")
             st.dataframe(f_df.head(100))
-
-        if not f_df.empty:
             st.bar_chart(f_df['Notice Type'].value_counts())
 else:
-    st.warning("⚠️ No data source found. Please upload a file or ensure Data.xlsx exists in the project folder.")
+    st.warning("⚠️ ارفع ملف Data.xlsx عشان نبدأ بجد.")
