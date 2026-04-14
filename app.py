@@ -7,27 +7,28 @@ from gtts import gTTS
 import io
 import re
 
+# إعدادات الصفحة
 st.set_page_config(page_title="Seshat Engineering Hub", layout="wide")
 
 # =====================================================
-# 1. ENHANCED COUNTRY DATA
+# 1. المرجعية الهندسية للدول والأعلام
 # =====================================================
-COUNTRY_DETAILS = {
-    "EGY": {"flag": "🇪🇬", "en": "Egypt", "ar": "جمهورية مصر العربية", "short_ar": "مصر"},
-    "ARS": {"flag": "🇸🇦", "en": "Saudi Arabia", "ar": "المملكة العربية السعودية", "short_ar": "السعودية"},
-    "UAE": {"flag": "🇦🇪", "en": "United Arab Emirates", "ar": "الإمارات العربية المتحدة", "short_ar": "الإمارات"}
+COUNTRY_INFO = {
+    "EGY": {"flag": "🇪🇬", "ar": "جمهورية مصر العربية", "en": "Egypt", "short": "مصر"},
+    "ARS": {"flag": "🇸🇦", "ar": "المملكة العربية السعودية", "en": "Saudi Arabia", "short": "السعودية"},
+    "UAE": {"flag": "🇦🇪", "ar": "الإمارات العربية المتحدة", "en": "United Arab Emirates", "short": "الإمارات"}
 }
 
 # =====================================================
-# 2. ROBUST DMS → DECIMAL
+# 2. تحويل الإحداثيات (أكثر استقراراً)
 # =====================================================
-def dms_to_decimal(text):
+def parse_coords(text):
     if pd.isna(text) or str(text).strip() == "": return None, None
     try:
-        # Regex مرن جداً لاقتناص الأرقام والاتجاهات مهما كان شكل الرموز
-        matches = re.findall(r"(\d+)[°\s]+(\d+)[\'\s]+(\d+)[\"\s]*([NSEW])", str(text).upper())
+        # Regex محدد جداً عشان ما يلقطش أرقام غلط
+        parts = re.findall(r"(\d+)[°\s](\d+)[\'\s](\d+)\"?\s*([NSEW])", str(text).upper())
         lat = lon = None
-        for d, m, s, drc in matches:
+        for d, m, s, drc in parts:
             dec = float(d) + float(m)/60 + float(s)/3600
             if drc in ["S", "W"]: dec *= -1
             if drc in ["N", "S"]: lat = dec
@@ -36,101 +37,109 @@ def dms_to_decimal(text):
     except: return None, None
 
 # =====================================================
-# 3. HIGH-PRECISION LOAD
+# 3. تحميل البيانات (تنظيف بمستوى الإكسيل)
 # =====================================================
 @st.cache_data
-def load_data():
+def load_and_clean():
     df = pd.read_csv("Data.csv", low_memory=False)
-    df.columns = df.columns.str.lower().str.strip()
+    df.columns = [c.lower().strip() for c in df.columns]
     
-    # تنظيف شامل للداتا
-    for col in ["adm", "station_class"]:
+    # تنظيف الأعمدة الأساسية
+    for col in ["adm", "station_class", "notice type"]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.upper().str.strip()
             
-    # توحيد مسميات الخدمة
+    # اشتقاق الخدمة (المصدر الوحيد للحقيقة)
     df["service"] = df["station_class"].map({"BC": "SOUND", "BT": "TV"}).fillna("OTHER")
     
+    # معالجة الإحداثيات
     if "location" in df.columns:
-        coords = df["location"].apply(dms_to_decimal)
+        coords = df["location"].apply(parse_coords)
         df["lat"] = coords.apply(lambda x: x[0])
         df["lon"] = coords.apply(lambda x: x[1])
     return df
 
-df = load_data()
+df = load_and_clean()
 
 # =====================================================
-# 4. INTENT & ENTITY (The NLP Engine)
+# 4. محرك استخراج الكيانات (Entity Extraction)
 # =====================================================
-ADM_MAP = {"مصر": "EGY", "egypt": "EGY", "سعودي": "ARS", "saudi": "ARS", "إمارات": "UAE", "uae": "UAE"}
-
-def get_entities(query):
+def nlp_engine(query):
     q = query.lower()
-    adms = list({v for k, v in ADM_MAP.items() if k in q})
-    service = "SOUND" if any(x in q for x in ["radio", "sound", "إذاعة", "صوت"]) else "TV" if any(x in q for x in ["tv", "تلفزيون", "مرئي"]) else None
-    intent = "COUNT" if any(x in q for x in ["عدد", "كام"]) else "COMPARE" if any(x in q for x in ["قارن", "فرق"]) else "OVERVIEW"
-    return adms, service, intent
+    # تحديد الدول
+    found_adms = []
+    if any(x in q for x in ["مصر", "egypt", "egy"]): found_adms.append("EGY")
+    if any(x in q for x in ["سعودية", "saudi", "ars", "ksa"]): found_adms.append("ARS")
+    if any(x in q for x in ["امارات", "uae"]): found_adms.append("UAE")
+    
+    # تحديد الخدمة
+    service = None
+    if any(x in q for x in ["sound", "radio", "إذاعة", "صوت"]): service = "SOUND"
+    elif any(x in q for x in ["tv", "تلفزيون", "مرئي"]): service = "TV"
+    
+    return found_adms, service
 
 # =====================================================
-# 5. UI DESIGN
+# 5. الواجهة (UI)
 # =====================================================
-st.title("📡 Seshat Engineering Assistant")
-st.markdown("---")
+st.title("📡 Seshat Precision Engineering")
 
-query = st.text_input("🎙️ اسأل عن محطات البث (مثلاً: قارن مصر والسعودية في الإذاعات):")
+query = st.text_input("🎙️ Engineering Query:", placeholder="مثال: كام محطة sound في مصر؟")
 
 if query:
-    adms, service, intent = get_entities(query)
+    adms, service = nlp_engine(query)
     
-    # الفلترة (Single Source of Truth)
+    # --- الفلترة الصارمة (هنا سر الدقة) ---
     f_df = df.copy()
     if adms: f_df = f_df[f_df["adm"].isin(adms)]
     if service: f_df = f_df[f_df["service"] == service]
-
-    # عرض الأعلام في Container منفصل
+    
+    # 1. عرض الأعلام والبيانات الرسمية
     if adms:
-        with st.container():
-            cols = st.columns(len(adms))
-            for i, a in enumerate(adms):
-                info = COUNTRY_DETAILS.get(a, {"flag": "🏳️", "short_ar": a, "ar": a, "en": a})
-                with cols[i]:
-                    st.markdown(f"### {info['flag']} {info['short_ar']}")
-                    st.info(f"**{info['ar']}**\n\n{info['en']}")
+        cols = st.columns(len(adms))
+        for i, code in enumerate(adms):
+            meta = COUNTRY_INFO.get(code)
+            with cols[i]:
+                st.metric(label=f"{meta['flag']} {meta['en']}", value=len(f_df[f_df['adm']==code]))
+                st.caption(f"**{meta['ar']}**")
 
-    # بناء الاستجابة الصوتي
-    if intent == "COUNT" and adms:
-        parts = [f"{COUNTRY_DETAILS.get(a, {'short_ar':a})['short_ar']} فيها {len(f_df[f_df['adm']==a])}" for a in adms]
-        response = " و ".join(parts) + f" محطة {service if service else ''}."
-    elif intent == "COMPARE" and len(adms) >= 2:
-        parts = [f"{a} ({len(f_df[f_df['adm']==a])})" for a in adms]
-        response = "المقارنة: " + " مقابل ".join(parts)
-    else:
-        response = f"لقيت {len(f_df)} محطة مطابقة لطلبك يا هندسة."
+    # 2. الرد الصوتي والعددي
+    count_val = len(f_df)
+    response = f"لقيت {count_val} محطة مطابقة لطلبك يا هندسة."
+    if adms:
+        parts = [f"{COUNTRY_INFO[a]['short']} فيها {len(f_df[f_df['adm']==a])}" for a in adms]
+        response = " و ".join(parts) + f" في خدمة {service if service else 'البث'}."
+        
+    st.success(response)
+    
+    # توليد الصوت
+    audio_io = io.BytesIO()
+    gTTS(response, lang="ar").write_to_fp(audio_io)
+    st.audio(audio_io.getvalue())
 
-    st.success(f"🤖 {response}")
+    # 3. الـ Visual Charts (إعادة الميزات القديمة)
+    st.markdown("### 📊 Visual Context")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.write("**Distribution by Service**")
+        st.bar_chart(f_df["service"].value_counts())
+    with c2:
+        if "notice type" in f_df.columns:
+            st.write("**Notice Type Breakdown**")
+            st.bar_chart(f_df["notice type"].value_counts())
 
-    # الصوت
-    try:
-        audio_io = io.BytesIO()
-        gTTS(response, lang="ar").write_to_fp(audio_io)
-        st.audio(audio_io.getvalue())
-    except: pass
-
-    # الخريطة المطورة
-    map_df = f_df.dropna(subset=["lat", "lon"]).head(1000)
-    if not map_df.empty:
-        st.subheader("📍 Geospatial Mapping")
-        m = folium.Map(location=[map_df.lat.mean(), map_df.lon.mean()], zoom_start=5, tiles="cartodb positron")
+    # 4. الخريطة (فقط للداتا المفلترة)
+    map_data = f_df.dropna(subset=["lat", "lon"])
+    if not map_data.empty:
+        st.markdown("### 📍 Geographic Mapping")
+        m = folium.Map(location=[map_data.lat.mean(), map_data.lon.mean()], zoom_start=5)
         cluster = MarkerCluster().add_to(m)
-
-        for _, r in map_df.iterrows():
-            color = "blue" if r.service == "SOUND" else "red"
+        for _, r in map_data.head(500).iterrows(): # ليميت للأداء
             folium.Marker(
-                [r.lat, r.lon],
-                popup=f"<b>Site:</b> {r.get('site_name', 'N/A')}<br><b>ADM:</b> {r.adm}<br><b>Class:</b> {r.station_class}",
-                icon=folium.Icon(color=color, icon="broadcast-tower", prefix="fa")
+                [r.lat, r.lon], 
+                popup=f"ADM: {r.adm} | Site: {r.get('site_name', 'N/A')}",
+                icon=folium.Icon(color="blue" if r.service=="SOUND" else "red")
             ).add_to(cluster)
-
-        st_folium(m, width="100%", height=600, key="main_map")
+        st_folium(m, width="100%", height=500, key="fixed_map")
     else:
-        st.warning("⚠️ مفيش بيانات مواقع (GPS) متاحة للفلترة دي.")
+        st.warning("⚠️ لا توجد إحداثيات للعرض على الخريطة لهذه المجموعة.")
