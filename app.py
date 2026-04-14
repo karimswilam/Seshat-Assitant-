@@ -1,28 +1,19 @@
-# ======================================================
-# 📡 Seshat AI – Final Voice Engineering Assistant
-# ======================================================
-
 import streamlit as st
 import pandas as pd
 import os
 import time
 import re
-import speech_recognition as sr
-import pyttsx3
+from gtts import gTTS
+import io
 
 # ======================================================
-# PAGE CONFIG
+# 📡 PAGE CONFIG
 # ======================================================
-st.set_page_config(
-    page_title="Seshat AI – Engineering Assistant",
-    layout="wide",
-    page_icon="📡"
-)
-
+st.set_page_config(page_title="Seshat AI – Engineering Assistant", layout="wide", page_icon="📡")
 st.title("📡 Seshat AI – Voice Engineering Assistant")
 
 # ======================================================
-# DOMAIN KNOWLEDGE
+# 📚 DOMAIN KNOWLEDGE
 # ======================================================
 SERVICE_KNOWLEDGE = {
     'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
@@ -37,34 +28,24 @@ COUNTRIES = {
 }
 
 # ======================================================
-# VOICE ENGINE
+# 🔊 SERVER-SIDE VOICE ENGINE (Fixed)
 # ======================================================
-engine = pyttsx3.init()
-engine.setProperty('rate', 170)
-
 def speak(text):
-    engine.say(text)
-    engine.runAndWait()
-
-def listen():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("🎙 Listening...")
-        audio = r.listen(source, timeout=5)
     try:
-        return r.recognize_google(audio)
-    except:
-        return ""
+        tts = gTTS(text=text, lang='en')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        st.audio(fp, format="audio/mp3", autoplay=True)
+    except Exception as e:
+        st.error(f"Voice Error: {e}")
 
 # ======================================================
-# DATA LOADING
+# 📂 DATA LOADING
 # ======================================================
 @st.cache_data(ttl=600)
 def load_data(uploaded_file, default="Data.xlsx"):
     target = uploaded_file if uploaded_file else default if os.path.exists(default) else None
-    if not target:
-        return pd.DataFrame()
-
+    if not target: return pd.DataFrame()
     df = pd.read_excel(target)
     df.columns = [str(c).strip() for c in df.columns]
     df['Adm'] = df['Adm'].astype(str).str.strip()
@@ -75,25 +56,20 @@ uploaded_file = st.file_uploader("📂 Upload Excel (Optional)", type=["xlsx"])
 df = load_data(uploaded_file)
 
 # ======================================================
-# 🧠 INTELLIGENCE LAYER (ENHANCED)
+# 🧠 INTELLIGENCE LAYER (With Your Regex Guard)
 # ======================================================
 def smart_intelligence(query):
     q = query.lower()
-    intel = {
-        "entities": {},
-        "intent": None,
-        "unsupported": None,
-        "conf_boost": 0.0
-    }
+    intel = {"entities": {}, "intent": None, "unsupported": None, "conf_boost": 0.0}
 
-    # 1. Supported countries (white‑list)
+    # 1. Supported countries
     for code, keywords in COUNTRIES.items():
         if any(k in q for k in keywords):
             intel['entities']['country'] = code
             intel['conf_boost'] += 0.3
             break
 
-    # 2. Regex guard: any 3‑letter country‑like code
+    # 2. Your Regex Guard (Preventing ISR/UAE Hallucination)
     potential_codes = re.findall(r'\b[a-z]{3}\b', q)
     for p_code in potential_codes:
         p_code_upper = p_code.upper()
@@ -106,12 +82,10 @@ def smart_intelligence(query):
     if any(w in q for w in ['dab', 'digital', 'gs1', 'ds1']):
         intel['entities']['service'] = 'DAB'
         intel['conf_boost'] += 0.3
-
-    if any(w in q for w in ['fm', 'radio', 'broadcast']):
+    elif any(w in q for w in ['fm', 'radio', 'broadcast']):
         intel['entities']['service'] = 'FM'
         intel['conf_boost'] += 0.3
-
-    if any(w in q for w in ['tv', 'television']):
+    elif any(w in q for w in ['tv', 'television']):
         intel['entities']['service'] = 'TV'
         intel['conf_boost'] += 0.3
 
@@ -127,65 +101,40 @@ def smart_intelligence(query):
 # ======================================================
 def process_query(query, df):
     intel = smart_intelligence(query)
-
-    # Unsupported country detected → polite refusal
+    
     if intel['unsupported']:
-        return (
-            pd.DataFrame(),
-            False,
-            [f"Unsupported Country: {intel['unsupported']}"],
-            min(0.6 + intel['conf_boost'], 1.0),
-            f"I understood your question, but I don't have data for {intel['unsupported']}."
-        )
+        msg = f"I understood your question about {intel['unsupported']}, but I don't have data for it."
+        return pd.DataFrame(), False, [f"Blocked: {intel['unsupported']}"], 1.0, msg
 
     fdf = df.copy()
     intent_log = []
-    confidence = min(0.35 + intel['conf_boost'], 1.0)
-
-    # Country filter
+    
     country = intel['entities'].get('country')
     if country:
         fdf = fdf[fdf['Adm'] == country]
         intent_log.append(f"Country={country}")
-
-    # Service filter
+    
     service = intel['entities'].get('service')
-    if service and service in SERVICE_KNOWLEDGE:
+    if service:
         fdf = fdf[fdf['Notice Type'].isin(SERVICE_KNOWLEDGE[service])]
         intent_log.append(f"Service={service}")
 
-    is_count = intel['intent'] == 'count'
-
-    return fdf, is_count, intent_log, confidence, None
+    return fdf, (intel['intent'] == 'count'), intent_log, min(0.35 + intel['conf_boost'], 1.0), None
 
 # ======================================================
-# SESSION MEMORY
+# UI & HISTORY
 # ======================================================
-if "history" not in st.session_state:
-    st.session_state.history = []
+if "history" not in st.session_state: st.session_state.history = []
 
-# ======================================================
-# UI
-# ======================================================
 if df.empty:
-    st.warning("⚠️ No data loaded.")
+    st.warning("⚠️ No data loaded. Please upload Data.xlsx.")
 else:
-    col1, col2 = st.columns([3, 1])
-
-    with col1:
-        user_query = st.text_input("💬 Ask Seshat (Text or Voice)")
-
-    with col2:
-        if st.button("🎙 Speak"):
-            user_query = listen()
-            if user_query:
-                st.success(user_query)
+    user_query = st.text_input("💬 Ask Seshat (e.g., 'KSA DAB count'):")
 
     if user_query:
         start = time.time()
         result, is_count, intent_log, conf, refusal = process_query(user_query, df)
         elapsed = time.time() - start
-
         st.session_state.history.append(user_query)
 
         st.subheader("🧠 AI Understanding")
@@ -194,25 +143,20 @@ else:
         st.caption(f"Confidence: {int(conf*100)}% | Time: {elapsed:.2f}s")
 
         if refusal:
-            st.warning(refusal)
+            st.error(refusal)
             speak(refusal)
-            st.stop()
-
-        if is_count:
-            msg = f"I found {len(result)} matching records."
-            st.metric("📊 Result Count", len(result))
-            speak(msg)
         else:
-            msg = f"I found {len(result)} records. Showing preview."
-            speak(msg)
-            st.dataframe(result.head(50), use_container_width=True)
+            if is_count:
+                msg = f"I found {len(result)} matching records."
+                st.metric("📊 Result Count", len(result))
+                speak(msg)
+            else:
+                st.dataframe(result.head(50), use_container_width=True)
+                speak(f"Found {len(result)} records.")
+            
+            if not result.empty:
+                st.bar_chart(result['Notice Type'].value_counts())
 
-        if not result.empty:
-            st.bar_chart(result['Notice Type'].value_counts())
-
-# ======================================================
-# HISTORY
-# ======================================================
-st.subheader("📁 Session History")
-for i, h in enumerate(st.session_state.history[-5:], 1):
-    st.write(f"{i}. {h}")
+st.sidebar.subheader("📁 Session History")
+for h in st.session_state.history[-5:]:
+    st.sidebar.write(f"• {h}")
