@@ -3,103 +3,76 @@ import pandas as pd
 import io
 from gtts import gTTS
 
-st.set_page_config(page_title="Seshat Engineering Hub", layout="wide", page_icon="📡")
-st.title("📡 Seshat AI - Data Analytics Mode")
-
-# --- القاموس الهندسي الموحد ---
-mapping_dict = {
-    'GS1': 'T-DAB Assignment',
-    'GS2': 'T-DAB Allotment',
-    'DS1': 'Digital Sound Assignment',
-    'DS2': 'Digital Sound Allotment'
+# --- الهيكل التنظيمي للخدمات (الجدول اللي إنت بعته) ---
+SERVICE_KNOWLEDGE = {
+    'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
+    'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
+    'FM': ['T01'],
+    'AM': ['T03', 'T04'],
+    'ADMIN': ['TB1', 'TB2', 'TB3', 'TB4', 'TB5', 'TB6', 'TB7', 'TB8', 'TB9']
 }
 
-# --- تحميل البيانات بذكاء ---
+# قاموس الوصف التفصيلي (Mapping)
+NOTICE_MAP = {
+    'GS1': 'T-DAB Assignment', 'GS2': 'T-DAB Allotment',
+    'DS1': 'GE06 T-DAB Assignment', 'DS2': 'GE06 T-DAB Allotment',
+    'GT1': 'DVB-T Assignment', 'GT2': 'DVB-T Allotment',
+    'T01': 'VHF Sound (FM)', 'T02': 'VHF/UHF TV'
+}
+
+st.set_page_config(page_title="Seshat Engineering Hub", layout="wide")
+st.title("📡 Seshat AI - Professional Telecom Mode")
+
 @st.cache_data(ttl=600)
 def load_data(file):
-    try:
+    if file:
         df = pd.read_excel(file)
-        # تنظيف أسماء الأعمدة
         df.columns = [str(c).strip() for c in df.columns]
-        
-        # تنظيف القيم داخل الأعمدة المهمة لمنع أخطاء الفلترة
+        # تنظيف الداتا من المسافات المخفية
         for col in ['Adm', 'Notice Type']:
-            if col in df.columns:
-                df[col] = df[col].astype(str).str.strip()
-
-        if 'Notice Type' in df.columns:
-            df['Notice_Description'] = df['Notice Type'].map(mapping_dict)
-
+            if col in df.columns: df[col] = df[col].astype(str).str.strip()
         return df
-    except Exception as e:
-        st.error(f"❌ خطأ في قراءة الملف: {e}")
-        return pd.DataFrame()
+    return pd.DataFrame()
 
-# --- واجهة رفع الملف ---
-uploaded_file = st.file_uploader("📂 ارفع ملف الإكسيل (Data.xlsx)", type=["xlsx"])
+uploaded_file = st.file_uploader("📂 Upload Data.xlsx", type=["xlsx"])
+df = load_data(uploaded_file)
 
-df = load_data(uploaded_file) if uploaded_file else pd.DataFrame()
-
-# --- محرك البحث والتحليل ---
-query = st.text_input(
-    "💬 اسأل عن البيانات (مثلاً: ars 3ndha kam gs1?):",
-    placeholder="Franko, Arabic, or English..."
-)
+query = st.text_input("💬 اسأل بالمعنى (مثلاً: ksa 3ndha kam DAB assignment?):")
 
 if query and not df.empty:
-    with st.spinner("🔍 جاري التحليل الهندسي..."):
-        q = query.lower()
-        f_df = df.copy()
+    q = query.lower()
+    f_df = df.copy()
 
-        # الفلاتر الذكية
-        has_adm = 'Adm' in f_df.columns
-        has_notice = 'Notice Type' in f_df.columns
+    # 1. ذكاء تحديد الخدمة (The Domain Logic)
+    target_types = []
+    if 'dab' in q: target_types.extend(SERVICE_KNOWLEDGE['DAB'])
+    if 'tv' in q or 'تلفزيون' in q: target_types.extend(SERVICE_KNOWLEDGE['TV'])
+    if 'fm' in q or 'إذاعة' in q: target_types.extend(SERVICE_KNOWLEDGE['FM'])
+    
+    # فلترة نوع الإشعار بناءً على الفهم الهندسي
+    if target_types:
+        f_df = f_df[f_df['Notice Type'].isin(target_types)]
+    
+    # 2. ذكاء تحديد الدولة
+    countries = {'ARS': ['ars', 'ksa', 'saudi'], 'EGY': ['egy', 'مصر', 'masr']}
+    for code, terms in countries.items():
+        if any(t in q for t in terms):
+            f_df = f_df[f_df['Adm'] == code]
 
-        # 1. فلتر الدول (دعم موسع للفرانكو)
-        country_filters = {
-            'ARS': ['ars', 'سعودية', 'saudi', 'ksa', 'saudia'],
-            'EGY': ['egy', 'مصر', 'egypt', 'masr']
-        }
+    # 3. ذكاء التفرقة بين Assignment و Allotment
+    if 'assignment' in q or 'تخصيص' in q:
+        f_df = f_df[f_df['Notice Type'].str.contains('1')] # GS1, GT1, DS1
+    elif 'allotment' in q or 'حجز' in q:
+        f_df = f_df[f_df['Notice Type'].str.contains('2')] # GS2, GT2, DS2
 
-        if has_adm:
-            for code, words in country_filters.items():
-                if any(w in q for w in words):
-                    f_df = f_df[f_df['Adm'] == code]
+    # --- النتيجة ---
+    result_count = len(f_df)
+    if any(w in q for w in ['kam', '3dd', 'count', 'عدد']):
+        st.metric("📊 النتيجة التحليلية", f"{result_count} Record")
+    else:
+        st.success(f"🤖 لقيتلك {result_count} سجل مطابق:")
+        st.dataframe(f_df.head(100))
 
-        # 2. فلتر نوع الإشعار (Notice Type)
-        if has_notice:
-            for n_type in mapping_dict.keys():
-                if n_type.lower() in q:
-                    f_df = f_df[f_df['Notice Type'] == n_type]
-
-        # 3. اكتشاف نية السؤال (إحصاء أم عرض)
-        is_count_query = any(w in q for w in [
-            'kam', '3dd', 'count', 'total', 'كم', 'عدد', 'إجمالي', 'wa7da', 'record'
-        ])
-
-        # --- عرض النتائج ---
-        if is_count_query:
-            result_count = len(f_df)
-            st.metric("📊 إجمالي السجلات المطابقة", result_count)
-            
-            # الرد الصوتي
-            try:
-                tts_text = f"العدد الإجمالي هو {result_count}"
-                tts = gTTS(text=tts_text, lang='ar')
-                audio_io = io.BytesIO()
-                tts.write_to_fp(audio_io)
-                st.audio(audio_io.getvalue(), format="audio/mp3")
-            except:
-                pass 
-        else:
-            st.success(f"🤖 تم العثور على {len(f_df)} سجل:")
-            cols_to_show = [c for c in ['Adm', 'Site/Allotment Name', 'Notice Type', 'Notice_Description'] if c in f_df.columns]
-            st.dataframe(f_df[cols_to_show].head(100))
-
-        # --- الرسم البياني الإحصائي ---
-        if not f_df.empty and has_notice:
-            st.subheader("📊 توزيع أنواع الإشعارات (Notice Types)")
-            st.bar_chart(f_df['Notice Type'].value_counts())
-
-elif not uploaded_file:
-    st.info("💡 برجاء رفع ملف Data.xlsx أولاً للبدء.")
+    # رسم بياني يوضح الفئات المفلترة
+    if not f_df.empty:
+        st.bar_chart(f_df['Notice Type'].value_counts())
