@@ -1,5 +1,5 @@
 # ======================================================
-# 📡 Seshat AI – Dynamic Engineering Analytics v4.0
+# 📡 Seshat AI v5.0 – Multi-Lingual Engineering Engine
 # ======================================================
 import streamlit as st
 import pandas as pd
@@ -10,40 +10,44 @@ from gtts import gTTS
 import io
 
 # 1. Page Configuration
-st.set_page_config(page_title="Seshat AI – Precision Engine", layout="wide", page_icon="📡")
+st.set_page_config(page_title="Seshat AI – Multi-Lingual", layout="wide", page_icon="📡")
 st.title("📡 Seshat AI – Professional Engineering Analytics")
 
-# 2. Dynamic Domain Knowledge (Base Mapping)
-# دي لسه ثابتة لأنها منطق هندسي (ITU Standards)
-SERVICE_KNOWLEDGE = {
-    'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
-    'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
-    'FM': ['T01'],
-    'AM': ['T03', 'T04']
+# 2. THE MASTER DICTIONARY (Training Data for LLM Context)
+# دي القائمة الشاملة اللي بتغطي العامية، الفصحى، والفرانكو
+COUNTRY_MAP = {
+    'EGY': ['egypt', 'masr', 'مصر', 'ام الدنيا', 'eg', 'egy', 'مصرية'],
+    'ARS': ['ksa', 'saudi', 'السعودية', 'المملكة', 'سعودية', 'ars', 'saudia'],
+    'ISR': ['israel', 'اسرائيل', 'isr', 'الاحتلال'],
+    'TUR': ['turkey', 'turkiye', 'تركيا', 'tur', 'اتراك', 'torkia']
 }
 
-# الأسماء الشائعة عشان لو اليوزر كتب اسم البلد مش الكود
-COMMON_NAME_MAP = {
-    'egypt': 'EGY', 'masr': 'EGY',
-    'saudi': 'ARS', 'ksa': 'ARS',
-    'israel': 'ISR',
-    'turkey': 'TUR', 'turkiye': 'TUR',
-    'jordan': 'JOR', 'emirates': 'UAE'
+SERVICE_MAP = {
+    'DAB': ['dab', 'داب', 'اذاعة ديجيتال', 'راديو رقمي', 'digital radio', 'digital audio'],
+    'TV': ['tv', 'television', 'تليفزيون', 'تلفزيون', 'مرئي', 'شاشات', 'محطات'],
+    'FM': ['fm', 'اف ام', 'اذاعة اف ام', 'radio fm'],
+    'AM': ['am', 'اي ام', 'اذاعة اي ام']
 }
 
-STOP_WORDS = ['how', 'the', 'for', 'any', 'get', 'all', 'and', 'was', 'has', 'now', 'records']
+# كلمات السؤال عشان الـ Logic ميتلخبطش (Stop Words & Intents)
+INTENT_KEYWORDS = {
+    'count': ['how many', 'kam', 'عدد', 'كم', 'كام', 'total', 'اجمالي', 'قد ايه'],
+    'show': ['show', 'عرض', 'وريني', 'هات', 'list', 'display']
+}
 
-# 3. Voice Engine
+# 3. Enhanced Voice Engine (Multi-Language Support)
 def speak(text):
     try:
-        tts = gTTS(text=text, lang='en')
+        # كشف اللغة تلقائياً (عربي أو إنجليزي)
+        lang = 'ar' if any('\u0600' <= char <= '\u06FF' for char in text) else 'en'
+        tts = gTTS(text=text, lang=lang)
         fp = io.BytesIO()
         tts.write_to_fp(fp)
         st.audio(fp.getvalue(), format="audio/mp3", autoplay=True)
-    except:
-        pass
+    except Exception as e:
+        st.error(f"Voice Error: {e}")
 
-# 4. Data Engine (Optimized for Large DB)
+# 4. Data Engine
 @st.cache_data(ttl=600)
 def load_data(uploaded_file, default="Data.xlsx"):
     target = uploaded_file if uploaded_file else default if os.path.exists(default) else None
@@ -51,99 +55,90 @@ def load_data(uploaded_file, default="Data.xlsx"):
     try:
         df = pd.read_excel(target)
         df.columns = [str(c).strip() for c in df.columns]
-        # Clean data for dynamic matching
-        if 'Adm' in df.columns:
-            df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
-        if 'Notice Type' in df.columns:
-            df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
+        if 'Adm' in df.columns: df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
+        if 'Notice Type' in df.columns: df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
         return df
     except Exception as e:
-        st.error(f"Data Load Error: {e}")
+        st.error(f"Data Error: {e}")
         return pd.DataFrame()
 
-uploaded_file = st.file_uploader("📂 Upload Excel Database", type=["xlsx"])
+uploaded_file = st.file_uploader("📂 Upload Database", type=["xlsx"])
 df = load_data(uploaded_file)
 
-# 5. The Dynamic Hybrid Engine (Future-Proof)
-def process_query_dynamic(query, df):
+# 5. The Universal Query Processor (The Heart of the Model)
+def process_universal_query(query, df):
     q = query.lower()
-    
-    # أ. استخراج البلاد المتاحة في الداتا حالياً (Dynamic Lookup)
-    if 'Adm' not in df.columns:
-        return None, "Error: 'Adm' column not found in database.", 0.0
-    
-    available_countries = df['Adm'].unique().tolist()
-    
-    # ب. التعرف على الدولة (Multi-Step Detection)
     detected_country = None
-    
-    # 1. البحث عن الاسم الشائع
-    for name, code in COMMON_NAME_MAP.items():
-        if name in q:
+    detected_service = None
+    is_count_request = False
+
+    # أ. الكشف عن الدولة (Mapping Loop)
+    for code, keywords in COUNTRY_MAP.items():
+        if any(word in q for word in keywords):
             detected_country = code
             break
-            
-    # 2. لو ملقاش، يدور على أي كود 3 حروف موجود فعلاً في الداتا
-    if not detected_country:
-        potential_codes = re.findall(r'\b[a-z]{3}\b', q)
-        for code in potential_codes:
-            if code.upper() in available_countries and code not in STOP_WORDS:
-                detected_country = code.upper()
-                break
-
-    # ج. التعرف على الخدمة (Service Detection)
-    service = next((s for s in SERVICE_KNOWLEDGE if s.lower() in q), None)
-
-    # د. منطق التحقق (The Logic Gate)
-    if not detected_country:
-        return None, "🔍 Country not detected or not in database. Try using the 3-letter code (e.g. EGY, TUR).", 0.0
     
-    if not service:
-        return None, "📡 Service type (DAB, TV, FM) not detected in your query.", 0.0
+    # ب. الكشف عن الخدمة (Mapping Loop)
+    for code, keywords in SERVICE_MAP.items():
+        if any(word in q for word in keywords):
+            detected_service = code
+            break
 
-    # هـ. تصفية البيانات (Precision Filtering)
-    fdf = df[(df['Adm'] == detected_country) & (df['Notice Type'].isin(SERVICE_KNOWLEDGE[service]))]
-    
-    is_count = any(w in q for w in ['count', 'how many', 'kam', 'عدد', 'total', 'records'])
-    
-    return (fdf, is_count, detected_country, service), None, 1.0
+    # ج. الكشف عن نية السؤال (Count vs Show)
+    if any(word in q for word in INTENT_KEYWORDS['count']):
+        is_count_request = True
 
-# 6. UI Loop
+    # د. منطق الفلترة الهندسية
+    if detected_country and detected_service:
+        # التأكد إن الدولة موجودة في ملف الإكسيل المرفوع فعلياً
+        if detected_country in df['Adm'].unique():
+            fdf = df[(df['Adm'] == detected_country) & (df['Notice Type'].isin(SERVICE_KNOWLEDGE_BASE[detected_service]))]
+            return (fdf, is_count_request, detected_country, detected_service), None
+        else:
+            return None, f"⚠️ كود الدولة {detected_country} غير موجود في ملف البيانات الحالي."
+    
+    return None, "🔍 مش فاهم السؤال أوي.. جرب تحدد الدولة والخدمة (مثلاً: عدد الـ DAB في تركيا)"
+
+# قاموس الأكواد التقنية (ITU)
+SERVICE_KNOWLEDGE_BASE = {
+    'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
+    'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
+    'FM': ['T01'],
+    'AM': ['T03', 'T04']
+}
+
+# 6. UI Implementation
 if df.empty:
-    st.info("👋 Welcome! Please upload your Excel database to start the engineering analysis.")
+    st.info("قم برفع ملف الـ Excel لبدء التحليل الهندي.")
 else:
-    user_query = st.text_input("💬 Ask about your data (e.g., 'How many TV for TUR' or 'show ISR DAB'):")
+    user_query = st.text_input("💬 اسأل بأي لغة (عربي، إنجليزي، فرانكو):", placeholder="مثلاً: كم عدد محطات الداب في تركيا؟")
 
     if user_query:
-        start = time.time()
-        result, error, conf = process_query_dynamic(user_query, df)
-        elapsed = time.time() - start
-
+        start_time = time.time()
+        result, error = process_universal_query(user_query, df)
+        
         if error:
             st.warning(error)
             speak(error)
         else:
             fdf, is_count, country, service = result
+            elapsed = time.time() - start_time
             
-            st.subheader("📊 Analysis Results")
-            col1, col2, col3 = st.columns(3)
-            with col1: st.metric("Territory", country)
-            with col2: st.metric("Service", service)
-            with col3: st.metric("Records Found", len(fdf))
-
+            st.subheader("📝 نتيجة التحليل")
+            
             if is_count:
-                st.success(f"Total {service} records for {country}: {len(fdf)}")
-                speak(f"Found {len(fdf)} records for {service} in {country}.")
+                count_val = len(fdf)
+                st.metric(label=f"إجمالي سجلات {service} في {country}", value=count_val)
+                msg = f"لقيت {count_val} سجل لخدمة {service} في {country}"
+                st.success(msg)
+                speak(msg)
             else:
-                st.dataframe(fdf, use_container_width=True)
-                speak(f"Showing the database records for {country}.")
-            
-            # Visualization
-            if not fdf.empty:
-                st.bar_chart(fdf['Notice Type'].value_counts())
-            
-            st.caption(f"Engine: Dynamic Lookup | Processing Time: {elapsed:.4f}s")
+                st.write(f"عرض سجلات {service} لـ {country}:")
+                st.dataframe(fdf.head(100), use_container_width=True)
+                speak(f"تم استخراج البيانات المطلوبة لـ {country}")
+
+            st.caption(f"زمن المعالجة: {elapsed:.4f} ثانية")
 
 # Footer
 st.divider()
-st.caption("Seshat AI v4.0 - Dynamic Database Integration Active.")
+st.caption("Seshat AI v5.0 | Dynamic Multi-Lingual Support Enabled")
