@@ -1,79 +1,55 @@
-import streamlit as st  # السطر ده لازم يفضل رقم 1 عشان نخلص من NameError
+import streamlit as st  # تأكد إن ده السطر رقم 1
 import pandas as pd
 import io
-import folium
-from streamlit_folium import st_folium
-from gtts import gTTS
+import os
 
 # =====================================================
-# 1. المرجعية الفنية (Technical Reference Mapping)
-#
+# 1. نظام تتبع الأخطاء (Error Tracing Flags)
 # =====================================================
-TSV_MAPPING = """Notice_Type	Broadcasting_Category	Service_Type	Description
-T01	Sound	VHF Sound	VHF Sound broadcasting station
-T02	TV	VHF/UHF TV	VHF/UHF Television broadcasting station
-GS1	Sound	Digital Sound	Digital sound (T-DAB) assignment
-GS2	Sound	Digital Sound	Digital sound (T-DAB) allotment
-GT1	TV	Digital TV	Digital television (DVB-T) assignment
-GT2	TV	Digital TV	Digital television (DVB-T) allotment
-T03	Sound	LF/MF Sound	Notification of LF/MF Sound station
-T04	Sound	MF Sound	Notification of MF Sound station
-TB5	Withdrawal	Suppression	Suppressing or withdrawing a notice
-"""
-mapping_df = pd.read_csv(io.StringIO(TSV_MAPPING), sep='\t')
-
-# =====================================================
-# 2. تحميل البيانات (Bulletproof Loading)
-# =====================================================
-@st.cache_data
-def load_and_enrich_data():
-    try:
-        # تجربة القراءة بأكثر من ترميز لحل مشكلة utf-8 codec error
-        try:
-            df = pd.read_csv("Data.csv", encoding='utf-8-sig') # utf-8-sig بتشيل أي علامات مخفية في أول الملف
-        except:
-            df = pd.read_csv("Data.csv", encoding='cp1252') # الحل البديل لملفات إكسيل العربية
-            
-        # حل مشكلة KeyError: 'Notice Type' عن طريق تنظيف أسماء الأعمدة أوتوماتيكياً
-        df.columns = [str(c).strip() for c in df.columns]
-        
-        # التأكد من وجود العمود بالظبط
-        target_col = 'Notice Type'
-        if target_col not in df.columns:
-            st.error(f"⚠️ مش لاقي عمود '{target_col}'. الأعمدة اللي قريتها هي: {list(df.columns)}")
-            return pd.DataFrame()
-
-        # الربط مع المرجعية
-        df = pd.merge(df, mapping_df, on=target_col, how='left')
-        return df
-    except Exception as e:
-        st.error(f"❌ خطأ غير متوقع: {e}")
-        return pd.DataFrame()
-
-# =====================================================
-# 3. تشغيل الـ Dashboard
-# =====================================================
-st.set_page_config(page_title="Seshat Engineering Hub", layout="wide")
+st.set_page_config(page_title="Seshat Debugging Mode", layout="wide")
 st.title("📡 Seshat Precision Engineering Hub")
 
-df = load_and_enrich_data()
+# تفقد وجود الملف في السيرفر
+if not os.path.exists("Data.csv"):
+    st.error("🚨 FLAG 1: ملف Data.csv مش موجود في الفولدر الرئيسي على GitHub!")
+else:
+    st.info("✅ FLAG 1: ملف Data.csv موجود وجاري فحصه...")
 
-query = st.text_input("🎙️ اسأل المساعد الهندسي:")
+# =====================================================
+# 2. تحميل البيانات مع Debugging Info
+# =====================================================
+@st.cache_data
+def load_data_with_trace():
+    try:
+        # تجربة القراءة مع معالجة الـ Encoding
+        try:
+            raw_df = pd.read_csv("Data.csv", encoding='utf-8-sig')
+            st.write("📊 FLAG 2: تم القراءة بترميز UTF-8")
+        except:
+            raw_df = pd.read_csv("Data.csv", encoding='cp1252')
+            st.write("📊 FLAG 2: تم القراءة بترميز CP1252 (Excel Legacy)")
 
-if query and not df.empty:
-    q = query.lower()
-    f_df = df.copy()
-    
-    # فلاتر ذكية بسيطة
-    if 'مصر' in q or 'egy' in q: f_df = f_df[f_df['Adm'] == 'EGY']
-    if 'sound' in q or 'إذاعة' in q: f_df = f_df[f_df['Broadcasting_Category'] == 'Sound']
-    
-    count = len(f_df)
-    msg = f"لقيت {count} محطة مطابقة يا هندسة."
-    st.success(f"🤖 {msg}")
-    
-    # الرسم البياني
-    st.bar_chart(f_df['Service_Type'].value_counts())
-    
-    # عرض البيانات
-    st.dataframe(f_df)
+        # فحص أسماء الأعمدة وتنظيفها
+        st.write("🔍 الأعمدة الأصلية في الملف:", list(raw_df.columns))
+        
+        # تنظيف شامل للأعمدة (إزالة مسافات، تحويل لنص، إزالة علامات غريبة)
+        raw_df.columns = [str(c).strip().replace('\ufeff', '') for c in raw_df.columns]
+        st.write("✨ الأعمدة بعد التنظيف (Stripped):", list(raw_df.columns))
+
+        return raw_df
+    except Exception as e:
+        st.error(f"❌ FLAG 3: فشل ذريع في قراءة الملف: {e}")
+        return pd.DataFrame()
+
+# تشغيل الفحص
+df = load_data_with_trace()
+
+if not df.empty:
+    target = 'Notice Type'
+    if target in df.columns:
+        st.success(f"🎯 FLAG 4: عمود '{target}' تم إيجاده بنجاح!")
+        # هنا نعرض أول 5 صفوف للتأكد
+        st.write("👀 عينة من البيانات:", df.head())
+    else:
+        st.error(f"⚠️ FLAG 4: فشل في إيجاد '{target}'. المتاح هو: {list(df.columns)}")
+        st.warning("نصيحة: اتأكد إنك سيفت الملف كـ CSV UTF-8 (Comma delimited) مش أي نوع تاني.")
