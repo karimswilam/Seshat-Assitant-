@@ -3,5 +3,5 @@ pandas
 folium
 streamlit-folium
 gTTS
-# google-generativeai  <-- شلته مؤقتاً لو مش هنستخدم الـ LLM API حالياً، سيبه لو نويت تطور NLP معقد
-# plotly               <-- شلته لأننا استبدلناه بـ st.bar_chart (أسرع وأخف)
+SpeechRecognition
+PyAudio
