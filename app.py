@@ -1,43 +1,110 @@
-# --- محرك التحليل الذكي المحدث ---
+```python
+import streamlit as st
+import pandas as pd
+import io
+from gtts import gTTS
+
+st.set_page_config(page_title="Seshat Engineering Hub", layout="wide")
+st.title("📡 Seshat AI - Data Analytics Mode")
+
+# --- Mapping ---
+mapping_dict = {
+    'GS1': 'T-DAB Assignment',
+    'GS2': 'T-DAB Allotment',
+    'DS1': 'Digital Sound Assignment',
+    'DS2': 'Digital Sound Allotment'
+}
+
+# --- Load Data ---
+@st.cache_data(ttl=600)
+def load_data(file):
+    try:
+        df = pd.read_excel(file)
+        df.columns = [str(c).strip() for c in df.columns]
+
+        if 'Notice Type' in df.columns:
+            df['Notice_Description'] = df['Notice Type'].map(mapping_dict)
+
+        return df
+    except Exception as e:
+        st.error(f"❌ Error loading file: {e}")
+        return pd.DataFrame()
+
+# --- Upload بدل hardcode ---
+uploaded_file = st.file_uploader("📂 Upload Excel File", type=["xlsx"])
+
+df = load_data(uploaded_file) if uploaded_file else pd.DataFrame()
+
+# --- Query ---
+query = st.text_input(
+    "💬 اسأل عن أي بيانات (Franko/Arabic/English):",
+    placeholder="مثلاً: ars 3ndha kam record?"
+)
+
 if query and not df.empty:
-    q = query.lower()
-    st.info(f"🔍 جاري تحليل الطلب: {query}")
-    
-    # 1. تنظيف الداتا لضمان دقة الفلترة
-    f_df = df.copy()
-    
-    # 2. منطق استخراج الدولة (Adm) - بيدعم الفرانكو والعربي والإنجليزي
-    if any(w in q for w in ['ars', 'سعودية', 'saudi']): 
-        f_df = f_df[f_df['Adm'] == 'ARS']
-    elif any(w in q for w in ['egy', 'مصر', 'egypt']): 
-        f_df = f_df[f_df['Adm'] == 'EGY']
-    
-    # 3. منطق استخراج نوع الإشعار (Notice Type)
-    if 'gs1' in q: f_df = f_df[f_df['Notice Type'] == 'GS1']
-    if 'gs2' in q: f_df = f_df[f_df['Notice Type'] == 'GS2']
-    if 'ds1' in q: f_df = f_df[f_df['Notice Type'] == 'DS1']
-    if 'ds2' in q: f_df = f_df[f_df['Notice Type'] == 'DS2']
+    with st.spinner("🔍 Processing..."):
+        q = query.lower()
+        f_df = df.copy()
 
-    # 4. الفرق الجوهري: هل المستخدم عايز "عدد" ولا "عرض بيانات"؟
-    statistical_keywords = ['kam', '3dd', 'count', 'total', 'كم', 'عدد', 'إجمالي']
-    
-    if any(w in q for w in statistical_keywords):
-        # لو السؤال عن العدد (Analytical Response)
-        result_count = len(f_df)
-        st.success(f"📊 الإجابة: العدد الإجمالي هو **{result_count}** سجل.")
-        
-        # رد صوتي بالأرقام
-        tts_msg = f"العدد الإجمالي هو {result_count}"
-        tts = gTTS(text=tts_msg, lang='ar')
-        audio_io = io.BytesIO()
-        tts.write_to_fp(audio_io)
-        st.audio(audio_io.getvalue(), format="audio/mp3")
-    else:
-        # لو السؤال عرض بيانات (Display Response)
-        st.success(f"🤖 لقيتلك {len(f_df)} سجل هندسي:")
-        st.dataframe(f_df.head(100)) # عرض أول 100 سجل بدلاً من سطر واحد
+        # --- Safety checks ---
+        has_adm = 'Adm' in f_df.columns
+        has_notice = 'Notice Type' in f_df.columns
 
-    # 5. الرسوم البيانية للتأكيد البصري
-    if not f_df.empty:
-        st.subheader("📈 توزيع البيانات المفلترة")
-        st.bar_chart(f_df['Notice Type'].value_counts())
+        # --- Country Filter ---
+        country_filters = {
+            'ARS': ['ars', 'سعودية', 'saudi', 'ksa'],
+            'EGY': ['egy', 'مصر', 'egypt']
+        }
+
+        if has_adm:
+            for code, words in country_filters.items():
+                if any(w in q for w in words):
+                    f_df = f_df[f_df['Adm'] == code]
+
+        # --- Notice Type Filter ---
+        if has_notice:
+            for n_type in mapping_dict.keys():
+                if n_type.lower() in q:
+                    f_df = f_df[f_df['Notice Type'] == n_type]
+
+        # --- Query Type Detection ---
+        is_count_query = any(w in q for w in [
+            'kam', '3dd', 'count', 'total', 'كم', 'عدد', 'إجمالي'
+        ])
+
+        # --- Response ---
+        if is_count_query:
+            result_count = len(f_df)
+
+            st.metric("📊 Total Records", result_count)
+
+            # --- Voice ---
+            try:
+                tts_text = f"العدد الإجمالي هو {result_count}"
+                tts = gTTS(text=tts_text, lang='ar')
+                audio_io = io.BytesIO()
+                tts.write_to_fp(audio_io)
+                st.audio(audio_io.getvalue(), format="audio/mp3")
+            except:
+                st.warning("⚠️ الصوت غير متاح حالياً")
+
+        else:
+            st.write(f"🤖 Found {len(f_df)} records")
+
+            cols_to_show = [c for c in [
+                'Adm',
+                'Site/Allotment Name',
+                'Notice Type',
+                'Notice_Description'
+            ] if c in f_df.columns]
+
+            st.dataframe(f_df[cols_to_show].head(100))
+
+        # --- Chart ---
+        if not f_df.empty and has_notice:
+            st.subheader("📊 Distribution")
+            st.bar_chart(f_df['Notice Type'].value_counts())
+
+else:
+    st.info("💡 Upload a file and start asking questions.")
+```
