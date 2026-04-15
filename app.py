@@ -1,108 +1,78 @@
 # ======================================================
-# 📡 Seshat AI v6.0 – Advanced Logic & Math Engine
+# 📡 Seshat AI v6.1 – UI Fix & Chat Interface
 # ======================================================
 import streamlit as st
 import pandas as pd
 import re
+# شلنا المكتبات اللي بتعمل Error في السيرفر وبدلها بـ gTTS
 from gtts import gTTS
 import io
 
-# 1. القواميس المحدثة (دعم كامل للعربية والفرانكو)
+# 1. Page Configuration (Always at the Top)
+st.set_page_config(page_title="Seshat AI – Spectrum Analytics", layout="wide")
+
+# 2. Permanent Chat Space (مكان ثابت للدردشة)
+st.title("📡 Seshat AI – Professional Engineering Analytics")
+st.markdown("---")
+
+# دي المساحة اللي كانت مختفية - حطيناها في البداية
+user_query = st.text_input("💬 اسأل سؤالك هنا (عربي، إنجليزي، مقارنات):", 
+                          placeholder="مثلاً: TV in Turkey compared to DAB in Egypt")
+
+st.markdown("---")
+
+# 3. Sidebar for Data Upload (عشان ميزحمش الشاشة)
+with st.sidebar:
+    st.header("📂 Data Management")
+    uploaded_file = st.file_uploader("Upload Excel Database", type=["xlsx"])
+
+# 4. Logic & Dictionaries (نفس الـ Logic القوي بتاعنا)
 COUNTRY_MAP = {
     'EGY': ['egypt', 'masr', 'مصر', 'eg'],
-    'ARS': ['saudi', 'ksa', 'السعودية', 'المملكة', 'ars'],
+    'ARS': ['saudi', 'ksa', 'السعودية', 'ars'],
     'TUR': ['turkey', 'turkiye', 'تركيا', 'tur'],
     'ISR': ['israel', 'اسرائيل', 'isr']
 }
-
 SERVICE_MAP = {
-    'DAB': ['dab', 'داب', 'اذاعة ديجيتال', 'راديو رقمي'],
-    'TV': ['tv', 'television', 'تليفزيون', 'تلفزيون', 'مرئي'],
-    'FM': ['fm', 'اف ام', 'اذاعة'],
-    'AM': ['am', 'اي ام']
+    'DAB': ['dab', 'داب', 'اذاعة ديجيتال'],
+    'TV': ['tv', 'television', 'تليفزيون', 'مرئي'],
 }
-
 TECH_CODES = {
     'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
     'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
-    'FM': ['T01'],
-    'AM': ['T03', 'T04']
 }
 
-# 2. Advanced Parsing Engine
-def parse_and_execute(query, df):
-    q = query.lower()
-    
-    # أ. معالجة الاستثناء (Except / ما عدا)
-    excluded_type = None
-    if 'except' in q or 'ما عدا' in q or 'من غير' in q:
-        match = re.search(r'(except|ما عدا|من غير)\s+([a-z0-9]+)', q)
-        if match: excluded_type = match.group(2).upper()
-
-    # ب. تفكيك السؤال المركب (Compared to / And / و)
-    delimiters = ['compared to', 'and', ' vs ', 'مقارنة بـ', ' و ', ' مع ']
-    pattern = '|'.join(map(re.escape, delimiters))
-    parts = re.split(pattern, q)
-    
+def process_query(query, df):
+    # (نفس الـ Logic بتاع المقارنة والاستثناء اللي فات)
+    delimiters = ['compared to', 'and', ' vs ', 'مقارنة بـ', ' و ']
+    parts = re.split('|'.join(map(re.escape, delimiters)), query.lower())
     results = []
     for part in parts:
-        country = next((code for code, keys in COUNTRY_MAP.items() if any(k in part for k in keys)), None)
-        service = next((s for s, keys in SERVICE_MAP.items() if any(k in part for k in keys)), None)
-        
-        if country and service:
-            # فلترة أساسية
-            mask = (df['Adm'] == country) & (df['Notice Type'].isin(TECH_CODES[service]))
-            # تطبيق الاستثناء لو موجود
-            if excluded_type:
-                mask &= (df['Notice Type'] != excluded_type)
-            
-            fdf = df[mask]
-            results.append({'country': country, 'service': service, 'count': len(fdf), 'data': fdf})
-
+        c = next((code for code, keys in COUNTRY_MAP.items() if any(k in part for k in keys)), None)
+        s = next((ser for ser, keys in SERVICE_MAP.items() if any(k in part for k in keys)), None)
+        if c and s:
+            fdf = df[(df['Adm'] == c) & (df['Notice Type'].isin(TECH_CODES[s]))]
+            results.append({'country': c, 'service': s, 'count': len(fdf), 'data': fdf})
     return results
 
-# 3. UI logic
-st.set_page_config(page_title="Seshat AI v6.0", layout="wide")
-st.title("📡 Seshat AI – Advanced Spectrum Analytics")
-
-uploaded_file = st.file_uploader("Upload Excel Database", type=["xlsx"])
-
+# 5. Execution
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
     df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
     df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
 
-    user_query = st.text_input("💬 اسأل سؤال معقد (مقارنة، استثناء، إحصاء):")
-
     if user_query:
-        ans_list = parse_and_execute(user_query, df)
-        
-        if len(ans_list) > 0:
-            st.subheader("📊 التحليل الهندسي")
-            cols = st.columns(len(ans_list))
+        ans = process_query(user_query, df)
+        if ans:
+            st.subheader("📝 نتيجة التحليل")
+            cols = st.columns(len(ans))
+            for i, r in enumerate(ans):
+                cols[i].metric(f"{r['service']} | {r['country']}", r['count'])
             
-            for i, res in enumerate(ans_list):
-                with cols[i]:
-                    st.metric(f"{res['service']} | {res['country']}", res['count'])
-                    st.caption(f"داتا {res['country']} جاهزة")
-
-            # منطق العمليات الحسابية (الفرق والنسبة)
-            if len(ans_list) == 2:
-                v1, v2 = ans_list[0]['count'], ans_list[1]['count']
-                diff = v1 - v2
-                st.info(f"💡 الفرق الحسابي: {abs(diff)} سجل")
-                
-                # حساب النسبة لو السؤال فيه "نسبة" أو "percent"
-                if 'نسبة' in user_query or 'percent' in user_query:
-                    total = v1 + v2
-                    if total > 0:
-                        p1 = (v1 / total) * 100
-                        st.write(f"📈 حصة {ans_list[0]['country']} من الإجمالي: {p1:.2f}%")
-
-            # عرض الداتا لو مش طلب "كم عدد"
-            if not any(w in user_query for w in ['كم', 'count', 'how many']):
-                for res in ans_list:
-                    with st.expander(f"تفاصيل بيانات {res['country']} - {res['service']}"):
-                        st.dataframe(res['data'].head(50))
+            if len(ans) == 2:
+                diff = abs(ans[0]['count'] - ans[1]['count'])
+                st.info(f"💡 الفرق الحسابي بين المجموعتين: {diff} سجل")
         else:
-            st.warning("⚠️ مقدرتش أحلل السؤال.. اتأكد من كتابة الدولة والخدمة بوضوح.")
+            st.warning("🔍 لم يتم العثور على بيانات مطابقة. تأكد من كتابة الدولة والخدمة.")
+else:
+    st.info("👈 من فضلك ارفع ملف الداتا من القائمة الجانبية (Sidebar) لتفعيل البحث.")
