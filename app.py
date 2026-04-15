@@ -6,7 +6,7 @@ import re
 from gtts import gTTS
 from difflib import get_close_matches
 
-# 1. الدستور الهندسي (ثابت)
+# 1. الدستور الهندسي (ثابت لا مساس به)
 MASTER_KNOWLEDGE = {
     'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
     'FM': ['T01', 'T03', 'T04'],
@@ -16,19 +16,21 @@ MASTER_KNOWLEDGE = {
     'ADMINISTRATIVE': ['TB1', 'TB3', 'TB4', 'TB6', 'TB8', 'TB5', 'TB9']
 }
 
+# أكواد التخصيص والتعيين الصارمة (Strict Mapping)
+STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2'] # Allotments (توزيع)
+STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1'] # Assignments (تخصيص)
+
 SYNONYMS = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية', 'egibt'],
+    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
     'ARS': ['saudi', 'ars', 'السعودية', 'ksa', 'المملكة'],
-    'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل', 'israil'],
-    'TUR': ['turkey', 'tur', 'تركيا', 'türkiye'],
+    'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
+    'TUR': ['turkey', 'tur', 'تركيا'],
     'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'ALLOT_KEY': ['allotment', 'allotments', 'تعيين', 'توزيع', 'allot'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تنسيب', 'assign'],
-    'DAB_KEY': ['dab', 'داب', 'ديجيتال'],
-    'FM_KEY': ['fm', 'اف ام', 'راديو', 'radio']
+    'ALLOT_KEY': ['allotment', 'allotments', 'تعيين', 'توزيع', 'توزيعات'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'تنسيب']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.S - Full Logic", layout="wide")
+st.set_page_config(page_title="Seshat AI v12.0.S_Final", layout="wide")
 
 @st.cache_data
 def load_db():
@@ -42,18 +44,17 @@ def load_db():
 
 db = load_db()
 
-# --- محرك البحث المدمج (The Full Solid Logic) ---
-def full_solid_engine(q, data):
+def final_solid_engine(q, data):
     q_clean = re.sub(r'[?؟.!]', '', q.lower()).strip()
     words = q_clean.split()
     
     conf = 0
     det_adm = None; det_svc = None; filter_type = None; exclude_code = None
     
-    # 1. لقط العناصر (الإدارة، النوع، الخدمة)
+    # 1. لقط العناصر بـ Cutoff عالي للدقة
     all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
     for word in words:
-        match = get_close_matches(word, all_keys, n=1, cutoff=0.75)
+        match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
         if match:
             for code, keys in SYNONYMS.items():
                 if match[0] in keys:
@@ -61,84 +62,58 @@ def full_solid_engine(q, data):
                         det_adm = code; conf += 50
                     elif code == 'ALLOT_KEY': filter_type = 'allot'
                     elif code == 'ASSIG_KEY': filter_type = 'assig'
-                    elif code == 'DAB_KEY': det_svc = 'DAB'; conf += 20
-                    elif code == 'FM_KEY': det_svc = 'FM'; conf += 20
                     break
 
-    # 2. لقط الخدمة من الدستور لو ملقنهاش من القاموس
-    if not det_svc:
-        for svc in MASTER_KNOWLEDGE.keys():
-            if svc.lower().replace("_", " ") in q_clean:
-                det_svc = svc; conf += 20; break
+    # 2. لقط الخدمة (TV, FM, DAB)
+    for svc in MASTER_KNOWLEDGE.keys():
+        if svc.lower().replace("_", " ") in q_clean or (svc == 'FM' and 'راديو' in q_clean) or (svc == 'DAB' and 'داب' in q_clean):
+            det_svc = svc; conf += 25; break
 
-    # 3. منطق الاستبعاد (Except)
-    if 'ماعدا' in q_clean or 'except' in q_clean:
-        potential_codes = [w.upper() for w in words if len(w) <= 4]
-        for c in potential_codes:
-            if any(c in codes for codes in MASTER_KNOWLEDGE.values()):
-                exclude_code = c; conf = min(conf + 10, 100)
+    if not det_adm: return None, "Please specify a country.", 0
 
-    if not det_adm:
-        return None, "Please specify a country (e.g., Turkey or مصر).", 0
-
-    # 4. تنفيذ الفلترة
-    mask = (data['Adm'].astype(str).str.contains(det_adm, na=False))
-    res = data[mask]
+    # 3. الفلترة الصارمة
+    res = data[data['Adm'].astype(str).str.contains(det_adm, na=False)]
     
-    # فلتر الخدمة
+    # فلترة الخدمة أولاً
     if det_svc:
         res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
     
-    # فلتر التخصيص/التعيين
+    # فلترة التخصيص/التعيين بناءً على الأكواد الصارمة (تمنع دخول DS2 في TV)
     if filter_type == 'allot':
-        res = res[res['Notice Type'].str.contains('2|G2|T2', na=False)]
-        conf = min(conf + 30, 100)
+        res = res[res['Notice Type'].isin(STRICT_ALLOT)]
+        conf = min(conf + 25, 100)
     elif filter_type == 'assig':
-        res = res[res['Notice Type'].str.contains('1|G1|T1|T01|T03|T04', na=False)]
-        conf = min(conf + 30, 100)
-    
-    if exclude_code:
-        res = res[res['Notice Type'] != exclude_code]
+        res = res[res['Notice Type'].isin(STRICT_ASSIG)]
+        conf = min(conf + 25, 100)
 
-    # رسالة ذكية تفاعلية
-    msg = f"Results for {det_adm}"
-    if det_svc: msg += f" - {det_svc}"
-    if filter_type: msg += f" ({filter_type})"
-    if not det_svc and filter_type: msg += " | Tip: Add 'FM' or 'TV' to narrow down."
-    
-    return res, msg, conf
+    # 4. رسالة ذكية وتلميحات (Context-Aware Hints)
+    msg = f"Confirmed results for {det_adm}"
+    hint = None
+    if not det_svc:
+        hint = "💡 Hint: Specify a service (FM, TV, DAB) for more precise charts."
+    if not filter_type:
+        hint = "💡 Hint: Ask for 'Assignment' or 'Allotment' to filter results."
 
-st.title("📡 Seshat AI – Solid Reference v12.0.S")
-user_input = st.text_input("Engineering Query (Interactive & Verified):")
+    return res, msg, conf, hint
+
+st.title("📡 Seshat AI – Solid Reference v12.0.S_Final")
+user_input = st.text_input("Ask Seshat:")
 
 if db is not None and user_input:
-    res_df, message, confidence_level = full_solid_engine(user_input, db)
+    res_df, message, confidence, smart_hint = final_solid_engine(user_input, db)
     
-    # الـ Confidence Indicator (ترمومتر الثقة)
-    st.progress(confidence_level / 100)
-    st.write(f"**Confidence Indicator:** {confidence_level}%")
+    st.progress(confidence / 100)
+    st.write(f"**Confidence Indicator:** {confidence}%")
     
     if res_df is not None:
         st.info(message)
+        if smart_hint: st.warning(smart_hint)
+            
         c1, c2 = st.columns([1, 2])
-        with c1:
-            st.metric("Total Records", len(res_df))
-        with c2:
-            if not res_df.empty:
-                st.subheader("Notice Type Distribution")
-                st.bar_chart(res_df['Notice Type'].value_counts())
+        with c1: st.metric("Records Found", len(res_df))
+        with c2: 
+            if not res_df.empty: st.bar_chart(res_df['Notice Type'].value_counts())
         
         st.dataframe(res_df)
-        
-        # الـ Smart Hint اللي كان ممسوح رجعناه هنا
-        if len(res_df) > 30 and 'assignment' not in user_input.lower() and 'تخصيص' not in user_input:
-            st.warning("💡 Hint: You can specify 'Assignment' (تخصيص) or 'Allotment' (توزيع) for better precision.")
-        
-        # Voice Output
-        try:
-            v_msg = f"Found {len(res_df)} records."
-            tts = gTTS(text=v_msg, lang='en')
-            b = io.BytesIO(); tts.write_to_fp(b); st.audio(b)
-        except: pass
     else:
         st.error(message)
