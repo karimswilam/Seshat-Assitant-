@@ -1,71 +1,108 @@
 # ======================================================
-# 📡 Seshat AI v6.4 – Clean Hybrid Engine (Stable)
+# 📡 Seshat AI v6.0 – Advanced Logic & Math Engine
 # ======================================================
 import streamlit as st
 import pandas as pd
 import re
+from gtts import gTTS
+import io
 
-# 1. الاعدادات الأساسية وتجنب الـ Errors الصوتية
-st.set_page_config(page_title="Seshat AI – Stable Mode", layout="wide")
+# 1. القواميس المحدثة (دعم كامل للعربية والفرانكو)
+COUNTRY_MAP = {
+    'EGY': ['egypt', 'masr', 'مصر', 'eg'],
+    'ARS': ['saudi', 'ksa', 'السعودية', 'المملكة', 'ars'],
+    'TUR': ['turkey', 'turkiye', 'تركيا', 'tur'],
+    'ISR': ['israel', 'اسرائيل', 'isr']
+}
 
-# 2. تحميل الداتا الثابتة (Internal Database)
-@st.cache_data
-def load_internal_data():
-    try:
-        # تأكد إن الملف ده موجود في نفس فولدر الكود على GitHub
-        return pd.read_excel("ITU_Data.xlsx") 
-    except:
-        return None
+SERVICE_MAP = {
+    'DAB': ['dab', 'داب', 'اذاعة ديجيتال', 'راديو رقمي'],
+    'TV': ['tv', 'television', 'تليفزيون', 'تلفزيون', 'مرئي'],
+    'FM': ['fm', 'اف ام', 'اذاعة'],
+    'AM': ['am', 'اي ام']
+}
 
-internal_df = load_internal_data()
+TECH_CODES = {
+    'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
+    'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
+    'FM': ['T01'],
+    'AM': ['T03', 'T04']
+}
 
-# 3. واجهة المستخدم (UI)
-st.title("📡 Seshat AI – Engineering Voice Assistant")
-
-# مساحة الرفع (اختيارية لدعم الـ Hybrid)
-uploaded_file = st.file_uploader("1. Upload New Data (Optional)", type=["xlsx"])
-
-# مساحة الدردشة (موجودة دايماً)
-user_query = st.text_input("2. Engineering Query:", placeholder="How many DAB in Egypt?")
-
-# 4. اختيار مصدر البيانات
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
-    st.info("Using Uploaded File")
-elif internal_df is not None:
-    df = internal_df
-    st.info("Using Internal Database")
-else:
-    df = None
-    st.error("No Data Source Found! Please upload a file or check ITU_Data.xlsx")
-
-# 5. محرك البحث الذكي (Logic)
-COUNTRY_MAP = {'EGY': ['egypt', 'مصر'], 'TUR': ['turkey', 'تركيا'], 'ISR': ['israel', 'اسرائيل'], 'ARS': ['saudi', 'السعودية']}
-TECH_CODES = {'DAB': ['GS1', 'GS2', 'DS1', 'DS2'], 'TV': ['T02', 'G02', 'GT1', 'GT2']}
-
-if df is not None and user_query:
-    # تنظيف الداتا
-    df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
-    df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
+# 2. Advanced Parsing Engine
+def parse_and_execute(query, df):
+    q = query.lower()
     
-    # فك السؤال (Simple Logic for Parallel Queries)
-    q = user_query.lower()
+    # أ. معالجة الاستثناء (Except / ما عدا)
+    excluded_type = None
+    if 'except' in q or 'ما عدا' in q or 'من غير' in q:
+        match = re.search(r'(except|ما عدا|من غير)\s+([a-z0-9]+)', q)
+        if match: excluded_type = match.group(2).upper()
+
+    # ب. تفكيك السؤال المركب (Compared to / And / و)
+    delimiters = ['compared to', 'and', ' vs ', 'مقارنة بـ', ' و ', ' مع ']
+    pattern = '|'.join(map(re.escape, delimiters))
+    parts = re.split(pattern, q)
+    
     results = []
-    
-    # تقسيم السؤال لو فيه مقارنة
-    parts = re.split('and|compared to|vs|و', q)
     for part in parts:
         country = next((code for code, keys in COUNTRY_MAP.items() if any(k in part for k in keys)), None)
-        service = 'DAB' if 'dab' in part else ('TV' if 'tv' in part or 'مرئي' in part else None)
+        service = next((s for s, keys in SERVICE_MAP.items() if any(k in part for k in keys)), None)
         
         if country and service:
-            count = len(df[(df['Adm'] == country) & (df['Notice Type'].isin(TECH_CODES[service]))])
-            results.append(f"**{service}** in **{country}**: {count} records")
+            # فلترة أساسية
+            mask = (df['Adm'] == country) & (df['Notice Type'].isin(TECH_CODES[service]))
+            # تطبيق الاستثناء لو موجود
+            if excluded_type:
+                mask &= (df['Notice Type'] != excluded_type)
+            
+            fdf = df[mask]
+            results.append({'country': country, 'service': service, 'count': len(fdf), 'data': fdf})
 
-    # عرض النتائج فوراً
-    if results:
-        st.subheader("📝 Analysis Result:")
-        for r in results:
-            st.success(r)
-    else:
-        st.warning("I understood your query, but I couldn't find matching criteria.")
+    return results
+
+# 3. UI logic
+st.set_page_config(page_title="Seshat AI v6.0", layout="wide")
+st.title("📡 Seshat AI – Advanced Spectrum Analytics")
+
+uploaded_file = st.file_uploader("Upload Excel Database", type=["xlsx"])
+
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
+    df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
+    df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
+
+    user_query = st.text_input("💬 اسأل سؤال معقد (مقارنة، استثناء، إحصاء):")
+
+    if user_query:
+        ans_list = parse_and_execute(user_query, df)
+        
+        if len(ans_list) > 0:
+            st.subheader("📊 التحليل الهندسي")
+            cols = st.columns(len(ans_list))
+            
+            for i, res in enumerate(ans_list):
+                with cols[i]:
+                    st.metric(f"{res['service']} | {res['country']}", res['count'])
+                    st.caption(f"داتا {res['country']} جاهزة")
+
+            # منطق العمليات الحسابية (الفرق والنسبة)
+            if len(ans_list) == 2:
+                v1, v2 = ans_list[0]['count'], ans_list[1]['count']
+                diff = v1 - v2
+                st.info(f"💡 الفرق الحسابي: {abs(diff)} سجل")
+                
+                # حساب النسبة لو السؤال فيه "نسبة" أو "percent"
+                if 'نسبة' in user_query or 'percent' in user_query:
+                    total = v1 + v2
+                    if total > 0:
+                        p1 = (v1 / total) * 100
+                        st.write(f"📈 حصة {ans_list[0]['country']} من الإجمالي: {p1:.2f}%")
+
+            # عرض الداتا لو مش طلب "كم عدد"
+            if not any(w in user_query for w in ['كم', 'count', 'how many']):
+                for res in ans_list:
+                    with st.expander(f"تفاصيل بيانات {res['country']} - {res['service']}"):
+                        st.dataframe(res['data'].head(50))
+        else:
+            st.warning("⚠️ مقدرتش أحلل السؤال.. اتأكد من كتابة الدولة والخدمة بوضوح.")
