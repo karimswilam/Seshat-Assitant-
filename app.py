@@ -1,97 +1,104 @@
 # ======================================================
-# 📡 Seshat AI v8.1 – Final Stable Hybrid Analytics
+# 📡 SESHAT AI – THE COMPLETE ENGINEERING REFERENCE (v9.2)
 # ======================================================
 import streamlit as st
 import pandas as pd
-import os
+import plotly.express as px
 import re
-import io  # السطر ده هو اللي كان ناقص وعامل الـ NameError
+import os
+import io
 from gtts import gTTS
 
-# 1. Page Configuration
-st.set_page_config(page_title="Seshat AI – Engineering", layout="wide")
-st.title("📡 Seshat AI – Engineering Analytics Engine")
+# 1. القاموس الهندسي الشامل والنهائي (بناءً على جدولك الرسمي)
+# تم إدراج كل الـ Notice Types لضمان عدم حدوث أي Skip
+ENGINEERING_KNOWLEDGE = {
+    'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
+    'DAB': ['GS1', 'GS2', 'DS1', 'DS2'], # تفريع من Sound للسهولة
+    'FM': ['T01', 'T03', 'T04'], # تفريع من Sound للسهولة
+    'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
+    'DIGITAL_SHARED': ['GA1', 'GB1'],
+    'PLAN_COMPLIANCE': ['TB2', 'TB7'],
+    'ADMINISTRATIVE': ['TB1', 'TB3', 'TB4', 'TB6', 'TB8', 'TB5', 'TB9']
+}
 
-# 2. Hybrid Data Loader
+st.set_page_config(page_title="Seshat Complete Reference", layout="wide")
+st.title("📡 Seshat AI – Complete Engineering Reference")
+
+# 2. Hybrid Data Loading
 @st.cache_data
-def load_data(uploaded=None):
+def load_db(uploaded=None):
     if uploaded:
         return pd.read_excel(uploaded)
     if os.path.exists("Data.xlsx"):
-        return pd.read_excel("Data.xlsx")
+        df = pd.read_excel("Data.xlsx")
+        df.columns = df.columns.str.strip()
+        return df
     return None
 
-# واجهة الرفع ثابتة وموجودة دائماً
 st.subheader("📂 1. Data Integration")
-uploaded_file = st.file_uploader("Upload New Data (Optional)", type=["xlsx"])
-df = load_data(uploaded_file)
+uploaded_file = st.file_uploader("Upload Excel Database", type=["xlsx"])
+active_df = load_db(uploaded_file)
 
-if df is not None:
-    st.sidebar.success(f"✅ Active Database: {len(df)} records")
-    df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
-    df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
-else:
-    st.sidebar.error("⚠️ Please ensure 'Data.xlsx' is on GitHub.")
+if active_df is not None:
+    st.sidebar.success(f"✅ Database Ready: {len(active_df)} records")
+    # توحيد التنسيق لضمان دقة البحث
+    active_df['Adm'] = active_df['Adm'].astype(str).str.strip().str.upper()
+    active_df['Notice Type'] = active_df['Notice Type'].astype(str).str.strip().str.upper()
 
-st.markdown("---")
+# 3. Operations Engine (Enhanced to cover all categories)
+st.subheader("💬 2. Engineering Query Space")
+query = st.text_input("Ask: (e.g., How many Administrative notices in Egypt?)", key="v92_q")
 
-# 3. Operations Engine
-def process_advanced_logic(query, data):
-    q = query.lower()
-    # دعم كلمات بحث أكثر (Recordings, Stations, etc.)
-    COUNTRY_MAP = {'EGY': ['egypt', 'masr', 'مصر'], 'ARS': ['saudi', 'السعودية', 'ars'], 'TUR': ['turkey', 'turkiye', 'تركيا']}
-    TECH_MAP = {'DAB': ['GS1', 'GS2', 'DS1', 'DS2'], 'TV': ['T02', 'G02', 'GT1', 'GT2']}
+def get_comprehensive_analysis(q, data):
+    q = q.lower().replace("_", " ") # لضمان فهم Digital_Shared كـ Digital Shared
+    conf = 0
+    COUNTRY_MAP = {'EGY': ['egypt', 'masr', 'مصر'], 'ARS': ['saudi', 'ksa', 'السعودية'], 'TUR': ['turkey', 'تركيا'], 'ISR': ['israel', 'اسرائيل']}
     
-    parts = re.split(r'and|compared to|vs|مقارنة| و ', q)
-    results = []
+    adm = next((code for code, keys in COUNTRY_MAP.items() if any(k in q for k in keys)), None)
+    if adm: conf += 50
     
-    for part in parts:
-        country = next((c for c, keys in COUNTRY_MAP.items() if any(k in part for k in keys)), None)
-        service = next((s for s, keys in TECH_MAP.items() if s.lower() in part or 'recording' in part), 'DAB')
+    # البحث عن الفئة المطلوبة من القاموس الجديد
+    svc = next((s for s in ENGINEERING_KNOWLEDGE.keys() if s.lower().replace("_", " ") in q), None)
+    if svc: conf += 50
+
+    if adm and svc:
+        allowed_types = ENGINEERING_KNOWLEDGE[svc]
+        mask = (data['Adm'] == adm) & (data['Notice Type'].isin(allowed_types))
+        return data[mask], adm, svc, conf
+    return None, None, None, 0
+
+# 4. Results & Validation Dashboards
+if active_df is not None and query:
+    res_df, adm_code, svc_name, confidence_level = get_comprehensive_analysis(query, active_df)
+    
+    st.progress(confidence_level / 100)
+    st.write(f"**Engine Confidence:** {confidence_level}%")
+
+    if res_df is not None:
+        count = len(res_df)
         
-        if country:
-            mask = (data['Adm'] == country) & (data['Notice Type'].isin(TECH_MAP[service]))
-            # منطق الاستثناء (Except)
-            if 'except' in q or 'ما عدا' in q:
-                match = re.search(r'(except|ما عدا)\s+([a-z0-9]+)', q)
-                if match: mask &= (data['Notice Type'] != match.group(2).upper())
-            
-            results.append({'country': country, 'service': service, 'count': len(data[mask])})
-    return results
+        # Audio Response
+        text_resp = f"The total records for {svc_name} in {adm_code} is {count}."
+        tts = gTTS(text=text_resp, lang='en')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        st.audio(fp)
+        
+        # Visualization & Validation
+        col1, col2 = st.columns([1, 2])
+        col1.metric(f"Total {svc_name} for {adm_code}", count)
+        
+        # رسم بياني يوضح توزيع الـ Notice Types داخل الفئة المختارة للتأكد من الشمولية
+        type_breakdown = res_df['Notice Type'].value_counts().reset_index()
+        fig = px.bar(type_breakdown, x='Notice Type', y='count', 
+                     title=f"Detailed Breakdown of {svc_name} (Validation Mode)")
+        col2.plotly_chart(fig, use_container_width=True)
 
-# 4. Chat & Results Space
-st.subheader("💬 2. Engineering Query")
-user_query = st.text_input("Ask: (e.g., How many DAB for Egypt compared to Saudi?)")
-
-if df is not None and user_query:
-    ans = process_advanced_logic(user_query, df)
-    if ans:
-        st.subheader("📝 Analysis Result")
-        m_cols = st.columns(len(ans))
-        chart_data = {}
-        speech_text = ""
-
-        for i, r in enumerate(ans):
-            m_cols[i].metric(f"{r['service']} | {r['country']}", r['count'])
-            chart_data[f"{r['country']} ({r['service']})"] = r['count']
-            speech_text += f"The count for {r['service']} in {r['country']} is {r['count']}. "
-
-        # Bar Chart Visualization
-        st.bar_chart(pd.Series(chart_data))
-
-        # Level 3: Market Share if requested
-        if 'نسبة' in user_query or 'percent' in user_query:
-            total = sum(chart_data.values())
-            for k, v in chart_data.items():
-                st.write(f"📈 **{k}** Share: **{(v/total)*100:.2f}%**")
-
-        # Voice Output (The Fixed Part)
-        try:
-            tts = gTTS(text=speech_text, lang='en')
-            audio_buffer = io.BytesIO() # تم حل الـ NameError هنا
-            tts.write_to_fp(audio_buffer)
-            st.audio(audio_buffer, format='audio/mp3')
-        except Exception as e:
-            st.warning("Voice output currently unavailable.")
+        if 'Lat' in res_df.columns and 'Long' in res_df.columns:
+            st.subheader("🗺️ Geographic Distribution")
+            st.map(res_df.dropna(subset=['Lat', 'Long'])[['Lat', 'Long']])
+        
+        with st.expander("🔍 View Raw Engineering Data"):
+            st.dataframe(res_df)
     else:
-        st.info("I'm ready! Just mention a country (EGY, ARS, TUR) and a service (DAB, TV).")
+        st.warning("⚠️ Category or Country not detected. Please use names like 'Administrative', 'Digital Shared', or 'TV'.")
