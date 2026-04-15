@@ -1,51 +1,45 @@
 # ======================================================
-# 📡 Seshat AI v8.0 – The Ultimate Hybrid Analytics
+# 📡 Seshat AI v8.1 – Final Stable Hybrid Analytics
 # ======================================================
 import streamlit as st
 import pandas as pd
 import os
 import re
+import io  # السطر ده هو اللي كان ناقص وعامل الـ NameError
 from gtts import gTTS
-import base64
 
 # 1. Page Configuration
-st.set_page_config(page_title="Seshat AI – Professional Engineering", layout="wide")
+st.set_page_config(page_title="Seshat AI – Engineering", layout="wide")
 st.title("📡 Seshat AI – Engineering Analytics Engine")
 
-# 2. Hybrid Data Loader (Correct Path for Data.xlsx)
+# 2. Hybrid Data Loader
 @st.cache_data
 def load_data(uploaded=None):
     if uploaded:
         return pd.read_excel(uploaded)
-    # استخدام المسار الصحيح للملف الثابت
     if os.path.exists("Data.xlsx"):
         return pd.read_excel("Data.xlsx")
     return None
 
-# مساحة الرفع (موجودة دايماً ومش هتختفي)
+# واجهة الرفع ثابتة وموجودة دائماً
 st.subheader("📂 1. Data Integration")
-uploaded_file = st.file_uploader("Upload New Data (Optional)", type=["xlsx"], key="hybrid_uploader")
+uploaded_file = st.file_uploader("Upload New Data (Optional)", type=["xlsx"])
 df = load_data(uploaded_file)
 
 if df is not None:
-    st.sidebar.success(f"✅ Database Active: {len(df)} records")
-    # تنظيف البيانات لضمان القراءة الصحيحة
+    st.sidebar.success(f"✅ Active Database: {len(df)} records")
     df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
     df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
 else:
-    st.sidebar.error("⚠️ No database found. Please check Data.xlsx on GitHub.")
+    st.sidebar.error("⚠️ Please ensure 'Data.xlsx' is on GitHub.")
 
 st.markdown("---")
 
-# 3. Chat & Logic Space
-st.subheader("💬 2. Engineering Query")
-user_query = st.text_input("Ask about comparisons, shares, or exclusions:", 
-                          placeholder="e.g., DAB in Egypt compared to Saudi")
-
-# 4. Operations Engine (The Complex Logic)
-def process_logic(query, data):
+# 3. Operations Engine
+def process_advanced_logic(query, data):
     q = query.lower()
-    COUNTRY_MAP = {'EGY': ['egypt', 'مصر', 'eg'], 'ARS': ['saudi', 'so3deya', 'السعودية', 'ars'], 'TUR': ['turkey', 'تركيا']}
+    # دعم كلمات بحث أكثر (Recordings, Stations, etc.)
+    COUNTRY_MAP = {'EGY': ['egypt', 'masr', 'مصر'], 'ARS': ['saudi', 'السعودية', 'ars'], 'TUR': ['turkey', 'turkiye', 'تركيا']}
     TECH_MAP = {'DAB': ['GS1', 'GS2', 'DS1', 'DS2'], 'TV': ['T02', 'G02', 'GT1', 'GT2']}
     
     parts = re.split(r'and|compared to|vs|مقارنة| و ', q)
@@ -53,7 +47,7 @@ def process_logic(query, data):
     
     for part in parts:
         country = next((c for c, keys in COUNTRY_MAP.items() if any(k in part for k in keys)), None)
-        service = next((s for s, keys in TECH_MAP.items() if s.lower() in part), 'DAB')
+        service = next((s for s, keys in TECH_MAP.items() if s.lower() in part or 'recording' in part), 'DAB')
         
         if country:
             mask = (data['Adm'] == country) & (data['Notice Type'].isin(TECH_MAP[service]))
@@ -62,31 +56,42 @@ def process_logic(query, data):
                 match = re.search(r'(except|ما عدا)\s+([a-z0-9]+)', q)
                 if match: mask &= (data['Notice Type'] != match.group(2).upper())
             
-            count = len(data[mask])
-            results.append({'country': country, 'service': service, 'count': count})
+            results.append({'country': country, 'service': service, 'count': len(data[mask])})
     return results
 
-# 5. Output Display & Voice Logic
+# 4. Chat & Results Space
+st.subheader("💬 2. Engineering Query")
+user_query = st.text_input("Ask: (e.g., How many DAB for Egypt compared to Saudi?)")
+
 if df is not None and user_query:
-    ans = process_logic(user_query, df)
+    ans = process_advanced_logic(user_query, df)
     if ans:
         st.subheader("📝 Analysis Result")
-        cols = st.columns(len(ans))
+        m_cols = st.columns(len(ans))
         chart_data = {}
-        text_output = ""
+        speech_text = ""
 
         for i, r in enumerate(ans):
-            cols[i].metric(f"{r['service']} | {r['country']}", r['count'])
+            m_cols[i].metric(f"{r['service']} | {r['country']}", r['count'])
             chart_data[f"{r['country']} ({r['service']})"] = r['count']
-            text_output += f"Number of {r['service']} stations in {r['country']} is {r['count']}. "
+            speech_text += f"The count for {r['service']} in {r['country']} is {r['count']}. "
 
-        # Dashboards (الـ Bar Chart رجع)
+        # Bar Chart Visualization
         st.bar_chart(pd.Series(chart_data))
 
-        # Voice Output (بدون مكتبات بتعمل Crash)
-        tts = gTTS(text=text_output, lang='en')
-        audio_file = io.BytesIO()
-        tts.write_to_fp(audio_file)
-        st.audio(audio_file, format='audio/mp3')
+        # Level 3: Market Share if requested
+        if 'نسبة' in user_query or 'percent' in user_query:
+            total = sum(chart_data.values())
+            for k, v in chart_data.items():
+                st.write(f"📈 **{k}** Share: **{(v/total)*100:.2f}%**")
+
+        # Voice Output (The Fixed Part)
+        try:
+            tts = gTTS(text=speech_text, lang='en')
+            audio_buffer = io.BytesIO() # تم حل الـ NameError هنا
+            tts.write_to_fp(audio_buffer)
+            st.audio(audio_buffer, format='audio/mp3')
+        except Exception as e:
+            st.warning("Voice output currently unavailable.")
     else:
-        st.warning("⚠️ Could not detect country or service. Use codes like EGY, ARS, TUR.")
+        st.info("I'm ready! Just mention a country (EGY, ARS, TUR) and a service (DAB, TV).")
