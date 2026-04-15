@@ -1,55 +1,68 @@
 # ======================================================
-# 📡 Seshat AI v6.6 – Final Corrected Hybrid Path
+# 📡 Seshat AI v6.7 – Lightning Fast Logic (Stable)
 # ======================================================
 import streamlit as st
 import pandas as pd
 import os
+import re
 
-st.set_page_config(page_title="Seshat AI – Stable Hybrid", layout="wide")
+# 1. منع أي مكتبات صوتية مسببة للأعطال
+st.set_page_config(page_title="Seshat AI – Stable", layout="wide")
 
-# 1. الدالة المسؤولة عن قراءة الداتا الثابتة بالاسم الصحيح
+# 2. تحميل البيانات (Hybrid Mode) من Data.xlsx
 @st.cache_data
-def get_internal_data():
-    # تعديل الاسم هنا عشان يطابق ملفك على GitHub
-    file_name = "Data.xlsx" 
-    if os.path.exists(file_name):
-        try:
-            return pd.read_excel(file_name)
-        except Exception as e:
-            st.error(f"Error reading Data.xlsx: {e}")
-            return None
+def get_data():
+    file_path = "Data.xlsx" # الاسم اللي اتفقنا عليه
+    if os.path.exists(file_path):
+        return pd.read_excel(file_path)
     return None
 
-internal_df = get_internal_data()
+db_df = get_data()
 
-# 2. UI Configuration
+# 3. واجهة المستخدم البسيطة
 st.title("📡 Seshat AI – Engineering Assistant")
+uploaded_file = st.file_uploader("Upload Excel (Optional)", type=["xlsx"])
 
-# الرفع اختياري
-uploaded_file = st.file_uploader("Upload New Data (Optional)", type=["xlsx"])
-
-# 3. Hybrid Logic (تحديد الـ Data Source)
+# اختيار مصدر البيانات
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
-    data_source_msg = "✅ Using: Uploaded File"
-elif internal_df is not None:
-    df = internal_df
-    data_source_msg = "✅ Using: Fixed Database (Data.xlsx)"
+    st.sidebar.success("Using: Uploaded File")
+elif db_df is not None:
+    df = db_df
+    st.sidebar.info("Using: Internal Data.xlsx")
 else:
     df = None
-    data_source_msg = "⚠️ No Data Source Found! Check Data.xlsx on GitHub."
+    st.sidebar.error("No Data Found! Check Data.xlsx on GitHub")
 
-st.sidebar.markdown(data_source_msg)
+# 4. محرك المعالجة السريع (Logic Engine)
+user_query = st.text_input("Engineering Query:", key="query_input")
 
-# 4. Chatting Space (متاح دائماً)
-user_query = st.text_input("Engineering Query:", placeholder="How many DAB for Egypt?")
-
-# 5. Execution Logic
 if df is not None and user_query:
-    # تنظيف البيانات
+    # تنظيف سريع للداتا
     df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
     df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
     
-    # الـ Logic المطور للمقارنات (Zero Intelligence Mode)
-    # [هنا بنحط الـ Parsing اللي عملناه قبل كدة للمقارنة والاستثناء]
-    st.write("Processing query...")
+    # القواميس (DAB, TV, FM)
+    TECH_MAP = {
+        'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
+        'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
+        'FM': ['T01']
+    }
+    COUNTRY_MAP = {'EGY': ['egypt', 'مصر'], 'ARS': ['saudi', 'ksa', 'السعودية'], 'TUR': ['turkey', 'تركيا']}
+
+    # معالجة السؤال المركب (Compared to / And)
+    parts = re.split(r'and|compared to|vs|و', user_query.lower())
+    
+    st.subheader("📝 Analysis Results")
+    cols = st.columns(len(parts))
+    
+    for i, part in enumerate(parts):
+        country = next((code for code, keys in COUNTRY_MAP.items() if any(k in part for k in keys)), None)
+        service = next((s for s, keys in TECH_MAP.items() if s.lower() in part), 'DAB') # افتراضي DAB لو محددش
+        
+        if country:
+            count = len(df[(df['Adm'] == country) & (df['Notice Type'].isin(TECH_MAP[service]))])
+            with cols[i]:
+                st.metric(f"{service} in {country}", count)
+        else:
+            st.warning(f"Could not identify country in: '{part}'")
