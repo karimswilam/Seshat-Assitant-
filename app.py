@@ -1,108 +1,82 @@
-# ======================================================
-# 📡 Seshat AI v6.0 – Advanced Logic & Math Engine
-# ======================================================
 import streamlit as st
 import pandas as pd
 import re
 from gtts import gTTS
 import io
 
-# 1. القواميس المحدثة (دعم كامل للعربية والفرانكو)
+# 1. القواميس الشاملة (عربي، إنجليزي، فرانكو)
 COUNTRY_MAP = {
     'EGY': ['egypt', 'masr', 'مصر', 'eg'],
-    'ARS': ['saudi', 'ksa', 'السعودية', 'المملكة', 'ars'],
-    'TUR': ['turkey', 'turkiye', 'تركيا', 'tur'],
-    'ISR': ['israel', 'اسرائيل', 'isr']
+    'ARS': ['ksa', 'saudi', 'السعودية', 'ars'],
+    'ISR': ['israel', 'اسرائيل', 'isr'],
+    'TUR': ['turkey', 'turkiye', 'تركيا', 'tur']
 }
 
 SERVICE_MAP = {
-    'DAB': ['dab', 'داب', 'اذاعة ديجيتال', 'راديو رقمي'],
+    'DAB': ['dab', 'داب', 'ديجيتال'],
     'TV': ['tv', 'television', 'تليفزيون', 'تلفزيون', 'مرئي'],
     'FM': ['fm', 'اف ام', 'اذاعة'],
-    'AM': ['am', 'اي ام']
 }
 
-TECH_CODES = {
+SERVICE_KNOWLEDGE_BASE = {
     'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
     'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
-    'FM': ['T01'],
-    'AM': ['T03', 'T04']
+    'FM': ['T01']
 }
 
-# 2. Advanced Parsing Engine
-def parse_and_execute(query, df):
-    q = query.lower()
-    
-    # أ. معالجة الاستثناء (Except / ما عدا)
-    excluded_type = None
-    if 'except' in q or 'ما عدا' in q or 'من غير' in q:
-        match = re.search(r'(except|ما عدا|من غير)\s+([a-z0-9]+)', q)
-        if match: excluded_type = match.group(2).upper()
-
-    # ب. تفكيك السؤال المركب (Compared to / And / و)
-    delimiters = ['compared to', 'and', ' vs ', 'مقارنة بـ', ' و ', ' مع ']
+# 2. وظيفة تحليل النص (The Multi-Tasker)
+def parse_compound_query(query):
+    # تفكيك السؤال لو فيه كلمات ربط
+    delimiters = ['compared to', 'and', 'و', 'مقارنة بـ', 'vs']
     pattern = '|'.join(map(re.escape, delimiters))
-    parts = re.split(pattern, q)
-    
-    results = []
-    for part in parts:
-        country = next((code for code, keys in COUNTRY_MAP.items() if any(k in part for k in keys)), None)
-        service = next((s for s, keys in SERVICE_MAP.items() if any(k in part for k in keys)), None)
-        
-        if country and service:
-            # فلترة أساسية
-            mask = (df['Adm'] == country) & (df['Notice Type'].isin(TECH_CODES[service]))
-            # تطبيق الاستثناء لو موجود
-            if excluded_type:
-                mask &= (df['Notice Type'] != excluded_type)
-            
-            fdf = df[mask]
-            results.append({'country': country, 'service': service, 'count': len(fdf), 'data': fdf})
+    parts = re.split(pattern, query.lower())
+    return [p.strip() for p in parts if p.strip()]
 
+# 3. وظيفة استخراج البيانات من كل جزء
+def extract_entities(sub_query):
+    country = next((code for code, keys in COUNTRY_MAP.items() if any(k in sub_query for k in keys)), None)
+    service = next((s for s, keys in SERVICE_MAP.items() if any(k in sub_query for k in keys)), None)
+    return country, service
+
+# 4. المحرك الرئيسي
+def run_comparison(query, df):
+    parts = parse_compound_query(query)
+    results = []
+
+    for part in parts:
+        country, service = extract_entities(part)
+        if country and service:
+            fdf = df[(df['Adm'] == country) & (df['Notice Type'].isin(SERVICE_KNOWLEDGE_BASE[service]))]
+            results.append({'country': country, 'service': service, 'count': len(fdf)})
+    
     return results
 
-# 3. UI logic
-st.set_page_config(page_title="Seshat AI v6.0", layout="wide")
-st.title("📡 Seshat AI – Advanced Spectrum Analytics")
+# --- UI Streamlit ---
+st.title("📡 Seshat AI – Multi-Tasking Engine")
 
-uploaded_file = st.file_uploader("Upload Excel Database", type=["xlsx"])
-
+uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
+    # تنظيف سريع
     df['Adm'] = df['Adm'].astype(str).str.strip().str.upper()
     df['Notice Type'] = df['Notice Type'].astype(str).str.strip().str.upper()
 
-    user_query = st.text_input("💬 اسأل سؤال معقد (مقارنة، استثناء، إحصاء):")
+    user_query = st.text_input("اسأل سؤال مركب (مثلاً: TV in Turkey vs DAB in Egypt):")
 
     if user_query:
-        ans_list = parse_and_execute(user_query, df)
+        comparisons = run_comparison(user_query, df)
         
-        if len(ans_list) > 0:
-            st.subheader("📊 التحليل الهندسي")
-            cols = st.columns(len(ans_list))
+        if len(comparisons) >= 2:
+            st.subheader("📊 Comparison Results")
+            cols = st.columns(len(comparisons))
+            for i, res in enumerate(comparisons):
+                cols[i].metric(f"{res['service']} in {res['country']}", res['count'])
             
-            for i, res in enumerate(ans_list):
-                with cols[i]:
-                    st.metric(f"{res['service']} | {res['country']}", res['count'])
-                    st.caption(f"داتا {res['country']} جاهزة")
-
-            # منطق العمليات الحسابية (الفرق والنسبة)
-            if len(ans_list) == 2:
-                v1, v2 = ans_list[0]['count'], ans_list[1]['count']
-                diff = v1 - v2
-                st.info(f"💡 الفرق الحسابي: {abs(diff)} سجل")
-                
-                # حساب النسبة لو السؤال فيه "نسبة" أو "percent"
-                if 'نسبة' in user_query or 'percent' in user_query:
-                    total = v1 + v2
-                    if total > 0:
-                        p1 = (v1 / total) * 100
-                        st.write(f"📈 حصة {ans_list[0]['country']} من الإجمالي: {p1:.2f}%")
-
-            # عرض الداتا لو مش طلب "كم عدد"
-            if not any(w in user_query for w in ['كم', 'count', 'how many']):
-                for res in ans_list:
-                    with st.expander(f"تفاصيل بيانات {res['country']} - {res['service']}"):
-                        st.dataframe(res['data'].head(50))
+            # حساب الفرق برمجياً (Zero Intelligence Math)
+            diff = abs(comparisons[0]['count'] - comparisons[1]['count'])
+            st.info(f"الفرق بين المجموعتين هو: {diff} سجل")
+        elif len(comparisons) == 1:
+            res = comparisons[0]
+            st.metric(f"{res['service']} in {res['country']}", res['count'])
         else:
-            st.warning("⚠️ مقدرتش أحلل السؤال.. اتأكد من كتابة الدولة والخدمة بوضوح.")
+            st.error("مقدرتش أفهم المقارنة، اتأكد إنك كتبت الدولتين والخدمتين صح.")
