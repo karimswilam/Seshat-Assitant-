@@ -4,7 +4,7 @@ import os
 import io
 import re
 from gtts import gTTS
-from difflib import get_close_matches # للتعامل مع الأخطاء الإملائية
+from difflib import get_close_matches
 
 # 1. الدستور الهندسي (Strict & Official)
 MASTER_KNOWLEDGE = {
@@ -17,31 +17,36 @@ MASTER_KNOWLEDGE = {
     'ADMINISTRATIVE': ['TB1', 'TB3', 'TB4', 'TB6', 'TB8', 'TB5', 'TB9']
 }
 
+# 2. تحسين الربط بين المسميات والـ Notice Types الهندسية
+SUB_TYPE_MAP = {
+    'assignment': ['T01', 'GS1', 'DS1', 'G02', 'GT1', 'DT1'], # كل ما هو تخصيص (ينتهي بـ 1 أو T02/G02)
+    'allotment': ['GS2', 'DS2', 'GT2', 'DT2', 'GA1', 'GB1']     # كل ما هو تعيين (ينتهي بـ 2 أو G/D T2)
+}
+
 SYNONYMS = {
     'EGY': ['egypt', 'egy', 'مصر', 'egibt'],
     'ARS': ['saudi', 'ars', 'السعودية', 'ksa'],
     'ISR': ['israel', 'isr', 'اسرائيل', 'israil'],
     'TUR': ['turkey', 'tur', 'تركيا'],
     'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'ALLOT_KEY': ['allotment', 'تعيين', 'تعيينات'],
-    'ASSIG_KEY': ['assignment', 'تخصيص', 'تخصيصات']
+    'ALLOT_KEY': ['allotment', 'تعيين', 'allotments'],
+    'ASSIG_KEY': ['assignment', 'تخصيص', 'assignments']
 }
 
-st.set_page_config(page_title="Seshat AI v12 - Core", layout="wide")
-st.title("📡 Seshat AI – Professional Engineering Assistant")
+st.set_page_config(page_title="Seshat AI v12.1", layout="wide")
+st.title("📡 Seshat AI – Precision Engineering Assistant")
 
-# 2. Coordinates Parser (DMS to Decimal)
+# --- Coordinates Parser (كما هو بلا تغيير) ---
 def dms_to_decimal(dms_str):
     try:
-        # Example: 042°07'03" E - 16°41'33" N
         parts = re.findall(r"(\d+)°(\d+)'(\d+)\"\s+([NSEW])", dms_str)
         if len(parts) == 2:
             results = []
             for d, m, s, direction in parts:
-                decimal = int(d) + int(m)/60 + int(s)/3600
-                if direction in ['S', 'W']: decimal *= -1
-                results.append(decimal)
-            return results[1], results[0] # Latitude, Longitude
+                val = int(d) + int(m)/60 + int(s)/3600
+                if direction in ['S', 'W']: val *= -1
+                results.append(val)
+            return results[1], results[0]
     except: return None, None
     return None, None
 
@@ -49,94 +54,85 @@ def dms_to_decimal(dms_str):
 def load_db(uploaded=None):
     target = uploaded if uploaded else ("All Broadcasting.xlsx" if os.path.exists("All Broadcasting.xlsx") else "Data.xlsx")
     if isinstance(target, str) and os.path.exists(target):
-        df = pd.read_excel(target)
-        df.columns = df.columns.str.strip()
-        return df
-    elif not isinstance(target, str):
         return pd.read_excel(target)
+    elif uploaded:
+        return pd.read_excel(uploaded)
     return None
 
-up_file = st.file_uploader("Upload Database", type=["xlsx"])
-db = load_db(up_file)
+db = load_db(st.sidebar.file_uploader("Upload Database", type=["xlsx"]))
 
-# 3. محرك البحث الذكي والـ Confidence Indicator
-user_q = st.text_input("Ask Seshat (Voice & Map enabled):")
+# 3. محرك البحث المطور بدقة الـ Exact Match
+user_q = st.text_input("Ask Seshat (Precision Mode Active):")
 
 def smart_engine(q, data):
     q = q.lower()
     conf = 0
-    detected_adm = None
-    detected_svc = None
+    det_adm = None
+    det_svc = None
+    specific_notice = None
     
-    # Fuzzy Search for Administration
-    all_keys = []
-    for k in SYNONYMS.values(): all_keys.extend(k)
-    
-    # لقط الإدارة مع احتمال الخطأ الإملائي
-    words = q.split()
-    for word in words:
-        match = get_close_matches(word, all_keys, n=1, cutoff=0.7)
+    # أ) لقط الإدارة (Fuzzy)
+    all_syns = [item for sublist in SYNONYMS.values() for item in sublist]
+    for word in q.split():
+        match = get_close_matches(word, all_syns, n=1, cutoff=0.7)
         if match:
-            for code, keywords in SYNONYMS.items():
-                if match[0] in keywords:
-                    detected_adm = code
-                    conf += 50
-                    break
-            if detected_adm: break
+            for code, keys in SYNONYMS.items():
+                if match[0] in keys: det_adm = code; conf += 50; break
+            if det_adm: break
 
-    # لقط الخدمة
-    for svc in MASTER_KNOWLEDGE.keys():
-        if svc.lower().replace("_", " ") in q or (svc == 'FM' and 'راديو' in q):
-            detected_svc = svc
-            conf += 50
+    # ب) لقط الـ Notice Type الصريح (زي DS1) - Exact Match
+    all_notices = [n for sub in MASTER_KNOWLEDGE.values() for n in sub]
+    for word in q.upper().split():
+        if word in all_notices:
+            specific_notice = word
+            conf = 100 # ثقة كاملة لو لقط الكود صراحة
             break
 
-    if detected_adm and detected_svc:
-        mask = (data['Adm'].astype(str).str.contains(detected_adm)) & \
-               (data['Notice Type'].isin(MASTER_KNOWLEDGE[detected_svc]))
-        res = data[mask]
+    # ج) لقط الخدمة (Category)
+    if not specific_notice:
+        for svc in MASTER_KNOWLEDGE.keys():
+            if svc.lower().replace("_", " ") in q: det_svc = svc; conf += 50; break
+
+    if det_adm:
+        # لو سأل عن كود محدد (زي DS1)
+        if specific_notice:
+            mask = (data['Adm'] == det_adm) & (data['Notice Type'] == specific_notice)
+            return data[mask], det_adm, specific_notice, conf
         
-        # فلتر التخصيص والتعيين
-        if any(k in q for k in SYNONYMS['ALLOT_KEY']):
-            res = res[res['Notice Type'].str.contains('2|G2|T2', na=False)]
-        elif any(k in q for k in SYNONYMS['ASSIG_KEY']):
-            res = res[res['Notice Type'].str.contains('1|G1|T1', na=False)]
+        # لو سأل عن فئة (زي DAB)
+        elif det_svc:
+            mask = (data['Adm'] == det_adm) & (data['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc]))
+            res = data[mask]
             
-        return res, detected_adm, detected_svc, conf
+            # تطبيق فلتر التخصيص/التعيين بدقة
+            if any(k in q for k in SYNONYMS['ALLOT_KEY']):
+                res = res[res['Notice Type'].isin(SUB_TYPE_MAP['allotment'])]
+            elif any(k in q for k in SYNONYMS['ASSIG_KEY']):
+                res = res[res['Notice Type'].isin(SUB_TYPE_MAP['assignment'])]
+            return res, det_adm, det_svc, conf
+            
     return None, None, None, 0
 
-# 4. المخرجات والـ Dashboard
+# 4. Dashboard & Results
 if db is not None and user_q:
     res, adm, svc, confidence = smart_engine(user_q, db)
-    
-    # الـ Confidence Indicator
     st.progress(confidence / 100)
-    st.write(f"**Confidence Indicator:** {confidence}%")
-
+    
     if res is not None:
-        count = len(res)
-        st.metric(f"Total {svc} for {adm}", count)
+        st.metric(f"Total {svc} for {adm}", len(res))
         
-        # Voice Output
-        voice_msg = f"Found {count} {svc} records for {adm}."
-        tts = gTTS(text=voice_msg, lang='en')
-        b = io.BytesIO(); tts.write_to_fp(b)
-        st.audio(b)
+        # Voice (كما هو)
+        tts = gTTS(text=f"I found {len(res)} results.", lang='en')
+        b = io.BytesIO(); tts.write_to_fp(b); st.audio(b)
 
-        # Dashboard
-        st.bar_chart(res['Notice Type'].value_counts())
-
-        # Map Logic
+        # Map Logic (باستخدام الـ Parser الجديد)
         if 'Location' in res.columns:
-            coords = res['Location'].apply(dms_to_decimal)
-            res['lat'] = [c[0] for c in coords]
-            res['lon'] = [c[1] for c in coords]
+            res['lat'], res['lon'] = zip(*res['Location'].apply(dms_to_decimal))
             map_df = res.dropna(subset=['lat', 'lon'])
             if not map_df.empty:
                 st.subheader("🗺️ Geographic Distribution")
                 st.map(map_df[['lat', 'lon']])
-            else:
-                st.info("📍 No valid coordinates found for this query to display on map.")
 
+        st.bar_chart(res['Notice Type'].value_counts())
         with st.expander("🔍 Engineering Data"):
             st.dataframe(res)
