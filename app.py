@@ -40,15 +40,7 @@ SYNONYMS = {
     'TV_KEY': ['tv', 'تلفزيون', 'مرئية']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.5 - Analytical Edition", layout="wide")
-
-# CSS (نفس الستايل بتاعك مع تحسين عرض المقارنة)
-st.markdown("""
-    <style>
-    .flag-img { width: 100px; border-radius: 8px; margin: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-    .answer-box { background: #ffffff; padding: 20px; border-radius: 15px; border-left: 5px solid #1e3a8a; margin-bottom: 20px; }
-    </style>
-    """, unsafe_allow_html=True)
+st.set_page_config(page_title="Seshat AI v12.0.6 - Deep Analysis", layout="wide")
 
 @st.cache_data
 def load_db():
@@ -61,20 +53,17 @@ def load_db():
 
 db = load_db()
 
-def analytical_engine(q, data):
+def deep_analytical_engine(q, data):
     q_lower = q.lower()
     is_arabic = any(char in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for char in q)
     words = re.findall(r'\w+', q_lower)
     
     adms = []; det_svc = None; filter_type = None; exclude_code = None
     
-    # 1. Detection Logic
+    # Matching Logic
     all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
     for i, word in enumerate(words):
-        # الاستثناء (Except/ما عدا)
-        if word in ['except', 'ماعدا', 'بدون', 'without'] and i+1 < len(words):
-            exclude_code = words[i+1].upper()
-            
+        if word in ['except', 'ماعدا'] and i+1 < len(words): exclude_code = words[i+1].upper()
         match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
         if match:
             for code, keys in SYNONYMS.items():
@@ -85,51 +74,61 @@ def analytical_engine(q, data):
                     elif code == 'DAB_KEY': det_svc = 'DAB'
                     elif code == 'TV_KEY': det_svc = 'TV'
 
-    if 'fm' in words or 'راديو' in q_lower: det_svc = 'FM'
-    if not adms: return None, ["EGY"], 0, "Unknown", is_arabic
+    if 'fm' in words: det_svc = 'FM'
+    if not adms: return None, [], 0, "No Administration detected.", is_arabic
 
-    # 2. Advanced Filtering
+    # filtering
     res = data[data['Adm'].isin(adms)]
     if det_svc: res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
-    if filter_type == 'allot': res = res[res['Notice Type'].isin(STRICT_ALLOT)]
-    elif filter_type == 'assig': res = res[res['Notice Type'].isin(STRICT_ASSIG)]
     if exclude_code: res = res[res['Notice Type'] != exclude_code]
 
-    # 3. Calculation & Comparison Text
-    stats = res.groupby('Adm').size().to_dict()
-    ans_parts = []
+    # --- logic الجديد: التفصيل لكل دولة (The Justification) ---
+    report_data = []
+    human_msg = ""
+    
     for adm in adms:
-        count = stats.get(adm, 0)
-        if is_arabic: ans_parts.append(f"{count} سجل لـ {adm}")
-        else: ans_parts.append(f"{count} records for {adm}")
-    
-    summary = " | ".join(ans_parts)
-    human_ans = f"التحليل: {summary}" if is_arabic else f"Analysis: {summary}"
-    
-    return res, adms, 100, human_ans, is_arabic
+        adm_df = res[res['Adm'] == adm]
+        allots = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
+        assigs = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
+        
+        # بناء نص التقرير
+        if is_arabic:
+            msg = f"الدولة {adm}: إجمالي {len(adm_df)} (تخصيص: {len(assigs)} | توزيع: {len(allots)})"
+        else:
+            msg = f"{adm}: Total {len(adm_df)} (Assig: {len(assigs)} | Allot: {len(allots)})"
+        
+        report_data.append({"adm": adm, "total": len(adm_df), "assig": len(assigs), "allot": len(allots), "msg": msg})
+
+    final_text = " | ".join([d['msg'] for d in report_data])
+    return res, report_data, 100, final_text, is_arabic
 
 # --- UI ---
-user_input = st.text_input("💬 Ask Analytical Seshat:", placeholder="Compare EGY and ARS DAB assignments")
+user_input = st.text_input("💬 Ask Seshat (Analytical Mode):", placeholder="Compare Egypt and Israel DAB")
 
 if db is not None and user_input:
-    res_df, current_adms, confidence, human_ans, is_ar = analytical_engine(user_input, db)
+    res_df, report, conf, ans_text, is_ar = deep_analytical_engine(user_input, db)
     
-    # Display Flags for all detected countries
-    cols = st.columns(len(current_adms))
-    for idx, adm in enumerate(current_adms):
-        cols[idx].image(FLAGS.get(adm), width=100, caption=adm)
-    
-    st.markdown(f"<div class='answer-box'><h3>{human_ans}</h3><p>Confidence: {confidence}%</p></div>", unsafe_allow_html=True)
-    
-    if not res_df.empty:
-        c1, c2 = st.columns([1, 2])
-        c1.metric("Total Match", len(res_df))
-        c2.bar_chart(res_df.groupby('Adm').size())
+    if report:
+        # عرض الأعلام والبيانات لكل دولة بشكل منفصل
+        flag_cols = st.columns(len(report))
+        for i, data in enumerate(report):
+            with flag_cols[i]:
+                st.image(FLAGS.get(data['adm'], ""), width=80)
+                st.metric(data['adm'], f"{data['total']} Records")
+                st.caption(f"Assignments: {data['assig']}")
+                st.caption(f"Allotments: {data['allot']}")
+
+        st.success(ans_text)
+        
+        # الرسوم البيانية - المقارنة التفصيلية
+        if len(report) > 1:
+            chart_data = pd.DataFrame(report).set_index('adm')[['assig', 'allot']]
+            st.bar_chart(chart_data)
         
         st.dataframe(res_df, use_container_width=True)
         
-        # Voice Assistant
+        # الصوت
         try:
-            tts = gTTS(text=human_ans, lang='ar' if is_ar else 'en')
+            tts = gTTS(text=ans_text, lang='ar' if is_ar else 'en')
             b = io.BytesIO(); tts.write_to_fp(b); st.audio(b)
         except: pass
