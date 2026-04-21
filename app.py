@@ -1,14 +1,18 @@
 import streamlit as st
 import pandas as pd
 import os
-import io
 import re
+import asyncio
 import base64
-from gtts import gTTS
+import random
+import nest_asyncio
+from edge_tts import Communicate
 from difflib import get_close_matches
 
-# --- 1. Flags System (Base64 Vectors for speed & offline reliability) ---
-# ملاحظة: دي عينات SVG صغيرة جداً وسريعة التحميل
+# 1. تفعيل nest_asyncio لمنع الـ Runtime Errors في Streamlit
+nest_asyncio.apply()
+
+# --- 2. Flags & Knowledge Mapping ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png",
     'ARS': "https://flagcdn.com/w160/sa.png",
@@ -18,7 +22,6 @@ FLAGS = {
     'ISR': "https://flagcdn.com/w160/il.png"
 }
 
-# --- 2. Master Knowledge Base ---
 MASTER_KNOWLEDGE = {
     'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
     'FM': ['T01', 'T03', 'T04'],
@@ -31,111 +34,111 @@ STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1']
 
 SYNONYMS = {
     'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
-    'ARS': ['saudi', 'ars', 'السعودية', 'ksa'],
-    'TUR': ['turkey', 'tur', 'تركيا'],
-    'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'GRC': ['greece', 'grc', 'اليونان', 'يونان'],
-    'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'تعيين'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'إذاعة صوتية', 't-dab', 'digital sound'],
-    'TV_KEY': ['tv', 'تلفزيون', 'تلفزيونية', 'مرئية', 'station', 'digital tv']
+    'ARS': ['saudi', 'السعودية', 'ksa', 'ars'],
+    'TUR': ['turkey', 'تركيا'],
+    'GRC': ['greece', 'اليونان'],
+    'ISR': ['israel', 'إسرائيل'],
+    'ALLOT_KEY': ['allotment', 'توزيع'],
+    'ASSIG_KEY': ['assignment', 'تخصيص'],
+    'DAB_KEY': ['dab', 'داب'],
+    'TV_KEY': ['tv', 'تلفزيون']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.4 - Elite Edition", layout="wide")
+st.set_page_config(page_title="Seshat AI v12.0.9", layout="wide")
 
-# CSS لإخراج مظهر الـ Dashboard الاحترافي
-st.markdown("""
-    <style>
-    .main { background: #f8f9fa; }
-    .flag-container { text-align: center; padding: 20px; }
-    .flag-img { width: 120px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
-    .answer-box { background: #ffffff; padding: 25px; border-radius: 15px; border-top: 5px solid #1e3a8a; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- 3. Neural Voice Engine (Salma & Guy) ---
+async def generate_neural_audio(text, is_ar):
+    voice = "ar-EG-SalmaNeural" if is_ar else "en-US-GuyNeural"
+    communicate = Communicate(text, voice)
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+    return audio_data
 
+def autoplay_audio(audio_bytes):
+    b64 = base64.b64encode(audio_bytes).decode()
+    md = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}">'
+    st.markdown(md, unsafe_allow_html=True)
+
+# --- 4. Intelligent Response Generator ---
+def get_dynamic_response(count, adm, is_ar):
+    if is_ar:
+        options = [
+            f"تحليلي لبيانات {adm} أظهر وجود {count} سجلات مطابقة.",
+            f"بالنسبة لطلبك، قاعدة بيانات {adm} تحتوي حالياً على {count} مدخلات.",
+            f"تم رصد {count} نتيجة تخص {adm} بناءً على المعايير المحددة."
+        ]
+    else:
+        options = [
+            f"My analysis shows {count} matching records for {adm}.",
+            f"For your request, the {adm} database currently contains {count} entries.",
+            f"I have identified {count} results for {adm} based on the specified criteria."
+        ]
+    return random.choice(options)
+
+# --- 5. Data Processing ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
-    target = "Data.xlsx" if "Data.xlsx" in files else (files[0] if files else None)
-    if target:
-        df = pd.read_excel(target); df.columns = df.columns.str.strip()
+    if files:
+        df = pd.read_excel(files[0])
+        df.columns = df.columns.str.strip()
         return df
     return None
 
-db = load_db()
+def main_engine(q, data):
+    q_low = q.lower()
+    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
+    words = re.findall(r'\w+', q_low)
+    adms = []; det_svc = None; filter_type = None
 
-def elite_engine(q, data):
-    q_lower = q.lower()
-    is_boolean = any(x in q_lower for x in ['does', 'is ', 'هل', 'موجود'])
-    is_arabic = any(char in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for char in q)
+    for code, keys in SYNONYMS.items():
+        if any(k in q_low for k in keys):
+            if code in FLAGS.keys(): adms.append(code)
+            elif code == 'ALLOT_KEY': filter_type = 'allot'
+            elif code == 'ASSIG_KEY': filter_type = 'assig'
+            elif code == 'DAB_KEY': det_svc = 'DAB'
+            elif code == 'TV_KEY': det_svc = 'TV'
     
-    words = re.findall(r'\w+', q_lower)
-    adms = []; det_svc = None; filter_type = None; exclude_codes = []
-    
-    # Matching
-    all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
-    for word in words:
-        match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
-        if match:
-            for code, keys in SYNONYMS.items():
-                if match[0] in keys:
-                    if code in FLAGS.keys() and code not in adms: adms.append(code)
-                    elif code == 'ALLOT_KEY': filter_type = 'allot'
-                    elif code == 'ASSIG_KEY': filter_type = 'assig'
-                    elif code == 'DAB_KEY': det_svc = 'DAB'
-                    elif code == 'TV_KEY': det_svc = 'TV'
-    
-    if 'fm' in words or 'راديو' in q_lower: det_svc = 'FM'
+    if not adms: return None, "EGY", "Please specify a country.", is_ar, 0
 
-    if not adms: return None, "EGY", 0, "Unknown Request", is_arabic
-
-    # Core Filtering
     res = data[data['Adm'].astype(str).str.contains(adms[0], na=False)]
     if det_svc: res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
     if filter_type == 'allot': res = res[res['Notice Type'].isin(STRICT_ALLOT)]
     elif filter_type == 'assig': res = res[res['Notice Type'].isin(STRICT_ASSIG)]
-    
-    # Building the Humanized Answer
-    found = len(res) > 0
-    if is_arabic:
-        ans_prefix = "نعم، يوجد" if found else "عذراً، لا يوجد"
-        ans_text = f"{ans_prefix} {len(res)} سجلات مطابقة لطلبك في {adms[0]}."
-    else:
-        ans_prefix = "Yes, there are" if found else "No, there are no"
-        ans_text = f"{ans_prefix} {len(res)} records found for your request in {adms[0]}."
-    
-    conf = 100 if (det_svc and filter_type) else 85
-    return res, adms[0], conf, ans_text, is_arabic
 
-# --- UI Layout ---
-user_input = st.text_input("💬 Ask Seshat (Arabic or English):", placeholder="Does Israel have FM assignments?")
+    ans = get_dynamic_response(len(res), adms[0], is_ar)
+    return res, adms[0], ans, is_ar, 100
+
+# --- 6. UI Rendering ---
+db = load_db()
+query = st.text_input("💬 Ask Seshat (Neural Dynamic Voice Mode):")
 
 if db is not None:
-    current_adm = "EGY"
-    if user_input:
-        res_df, current_adm, confidence, human_ans, is_ar = elite_engine(user_input, db)
+    if query:
+        res_df, adm_code, response_text, is_arabic, confidence = main_engine(query, db)
         
-        # Display Flag
-        flag_url = FLAGS.get(current_adm)
-        st.markdown(f"<div class='flag-container'><img src='{flag_url}' class='flag-img'></div>", unsafe_allow_html=True)
-        
-        # Display Answer
-        st.markdown(f"<div class='answer-box'><h3>{human_ans}</h3><p>Engine Confidence: {confidence}%</p></div>", unsafe_allow_html=True)
-        
-        if not res_df.empty:
-            c1, c2 = st.columns([1, 2])
-            with c1: st.metric("Count", len(res_df))
-            with c2: st.bar_chart(res_df['Notice Type'].value_counts())
+        # Dashboard Style (v12.04 Heritage)
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            st.image(FLAGS.get(adm_code, FLAGS['EGY']), width=120)
+            st.metric("Confidence", f"{confidence}%")
+        with col2:
+            st.markdown(f"### {response_text}")
+
+        if res_df is not None:
             st.dataframe(res_df, use_container_width=True)
             
-            # Professional Voice Output
+            # Voice Execution (The Fix)
             try:
-                lang_code = 'ar' if is_ar else 'en'
-                tts = gTTS(text=human_ans, lang=lang_code, slow=False)
-                b = io.BytesIO(); tts.write_to_fp(b); st.audio(b)
-            except: pass
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                audio_content = new_loop.run_until_complete(generate_neural_audio(response_text, is_arabic))
+                autoplay_audio(audio_content)
+            except Exception as e:
+                st.error(f"Voice engine error: {e}")
     else:
-        # Default View
-        st.markdown(f"<div class='flag-container'><img src='{FLAGS['EGY']}' class='flag-img'></div>", unsafe_allow_html=True)
-        st.info("Welcome, Engineer. Please enter your query above.")
+        st.info("Waiting for your professional inquiry...")
+else:
+    st.error("Data file not found. Please ensure your Excel file is in the root directory.")
