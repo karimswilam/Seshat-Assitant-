@@ -3,11 +3,12 @@ import pandas as pd
 import os
 import io
 import re
-from gtts import gTTS
+import asyncio
+import edge_tts
 from rapidfuzz import process, fuzz
 
-# --- 1. CONFIG & RECOVERY (Fixed Lists) ---
-st.set_page_config(layout="wide", page_title="Seshat Interactive Voice v13.6")
+# --- 1. CONFIG & RECOVERY (Fixed Logic) ---
+st.set_page_config(layout="wide", page_title="Seshat Neural AI v13.7")
 
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png", 'ARS': "https://flagcdn.com/w160/sa.png",
@@ -17,7 +18,6 @@ FLAGS = {
 
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
-STOP_WORDS = ['does', 'is', 'how', 'many', 'have', 'has', 'show', 'give', 'me', 'the']
 
 SYNONYMS = {
     'EGY': ['egypt', 'egy', 'مصر'], 'ARS': ['saudi', 'ars', 'ksa', 'السعودية'],
@@ -27,6 +27,27 @@ SYNONYMS = {
     'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص'],
     'DAB_KEY': ['dab', 'داب'], 'TV_KEY': ['tv', 'تلفزيون'], 'FM_KEY': ['fm', 'راديو']
 }
+
+# --- 2. HUMAN VOICE ENGINE (Neural TTS) ---
+async def generate_human_voice(text):
+    """توليد صوت بشري عالي الجودة باستخدام Edge-TTS"""
+    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
+    # اختيار الصوت: شاكر للعربي، وAndrew للإنجليزي (أصوات وقورة)
+    voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
+    
+    communicate = edge_tts.Communicate(text, voice)
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+    return audio_data
+
+def play_audio(text):
+    """دالة وسيطة لتشغيل الصوت جوه Streamlit"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    audio_bytes = loop.run_until_complete(generate_human_voice(text))
+    st.audio(audio_bytes, format="audio/mp3")
 
 @st.cache_data
 def load_db():
@@ -39,21 +60,12 @@ def load_db():
 
 db = load_db()
 
-def speak(text, lang_auto=True):
-    """وظيفة موحدة لإخراج الصوت"""
-    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
-    tts = gTTS(text=text, lang='ar' if is_ar else 'en', slow=False)
-    b = io.BytesIO()
-    tts.write_to_fp(b)
-    return b
-
-# --- 2. LOGICAL ENGINE ---
+# --- 3. LOGICAL ENGINE ---
 def engineering_engine(q, data):
     q_low = q.lower()
-    clean_q = re.sub(r'\b(' + '|'.join(STOP_WORDS) + r')\b', '', q_low)
-    words = re.findall(r'\w+', clean_q)
-    
+    words = re.findall(r'\w+', q_low)
     selected_adms = []; services = []
+    
     wants_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
     wants_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
     if not wants_assig and not wants_allot: wants_assig = wants_allot = True
@@ -95,47 +107,35 @@ def engineering_engine(q, data):
     msg = " | ".join([f"{r['Administration']}: {r.get('Assignments','')} {r.get('Allotments','')}" for r in reports])
     return final_df, reports, msg, True
 
-# --- 3. UI LAYOUT ---
-st.title("🎙️ Seshat Interactive Voice Dashboard")
+# --- 4. UI ---
+st.title("🛰️ Seshat Human-Voice Assistant")
 
-# Input Section
-query = st.text_input("✍️ Type your engineering question:", placeholder="e.g., How many DAB stations in Egypt and Saudi?")
+query = st.text_input("✍️ Enter Question (Arabic or English):", placeholder="Example: Egypt vs Saudi DAB")
 
-col1, col2 = st.columns([1, 5])
-with col1:
-    if st.button("🔊 Play Question"):
-        if query:
-            st.audio(speak(query))
-        else:
-            st.warning("Write something first!")
+c1, c2 = st.columns([1, 5])
+with c1:
+    if st.button("🔊 Read Question"):
+        if query: play_audio(query)
 
-# Processing & Results
 if query and db is not None:
     res_df, reports, msg, success = engineering_engine(query, db)
     
     if success and reports:
-        # Flags Row
+        # Flags
         adms = list(set([r['Administration'].split()[0] for r in reports]))
-        f_cols = st.columns(len(adms) if adms else 1)
-        for i, a in enumerate(adms):
-            f_cols[i].image(FLAGS.get(a), width=80, caption=a)
+        f_cols = st.columns(len(adms))
+        for i, a in enumerate(adms): f_cols[i].image(FLAGS.get(a), width=70)
 
-        # Charts & Tables
+        # Analysis
         chart_df = pd.DataFrame(reports).set_index('Administration')
-        
-        # Smart Filter for columns
-        cols = []
-        if any(x in query.lower() for x in SYNONYMS['ASSIG_KEY']): cols.append("Assignments")
-        if any(x in query.lower() for x in SYNONYMS['ALLOT_KEY']): cols.append("Allotments")
-        display_df = chart_df[cols] if cols else chart_df
-        
-        st.bar_chart(display_df)
-        st.table(display_df)
+        cols = [c for c in ["Assignments", "Allotments"] if c in chart_df.columns]
+        st.bar_chart(chart_df[cols])
+        st.table(chart_df[cols])
 
-        # Voice Output (The Answer)
-        st.markdown("### 🔊 Assistant Answer")
+        # Neural Voice Output
+        st.markdown("### 🔊 Assistant Response (Neural Voice)")
         st.success(msg)
-        st.audio(speak(msg)) # بيشغل الإجابة صوتياً فوراً
+        play_audio(msg) # الإجابة بتتقرأ أوتوماتيك بصوت بشري
 
-        with st.expander("Engineering Details (Raw Data)"):
+        with st.expander("Engineering Records"):
             st.dataframe(res_df, use_container_width=True)
