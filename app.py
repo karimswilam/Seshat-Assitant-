@@ -6,7 +6,7 @@ import re
 import asyncio
 from difflib import get_close_matches
 
-# محاولة استيراد المكتبات المطلوبة للـ Neural Voice
+# محاولة معالجة المكتبات
 try:
     import edge_tts
     import nest_asyncio
@@ -15,7 +15,7 @@ try:
 except ImportError:
     VOICE_READY = False
 
-# --- 1. Flags & Intelligence System ---
+# --- 1. Database & Flags ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png",
     'ARS': "https://flagcdn.com/w160/sa.png",
@@ -26,6 +26,7 @@ FLAGS = {
 }
 
 MASTER_KNOWLEDGE = {
+    'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
     'FM': ['T01', 'T03', 'T04'],
     'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
     'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
@@ -41,16 +42,16 @@ SYNONYMS = {
     'CYP': ['cyprus', 'cyp', 'قبرص'],
     'GRC': ['greece', 'grc', 'اليونان', 'يونان'],
     'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص'],
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
     'DAB_KEY': ['dab', 'داب', 'صوتية'],
     'TV_KEY': ['tv', 'تلفزيون', 'مرئية']
 }
 
 st.set_page_config(page_title="Seshat AI v12.0.5", layout="wide")
 
-# --- 2. Neural Voice Logic (Microsoft Neural) ---
-async def speak_neural(text, is_ar):
+# --- 2. Guaranteed Voice Engine (Fixing the Loop) ---
+async def generate_neural_audio(text, is_ar):
     voice = "ar-EG-SalmaNeural" if is_ar else "en-US-GuyNeural"
     communicate = edge_tts.Communicate(text, voice)
     audio_data = b""
@@ -63,7 +64,7 @@ async def speak_neural(text, is_ar):
 st.markdown("""
     <style>
     .ans-card { background: white; padding: 25px; border-radius: 15px; border-left: 10px solid #1e3a8a; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .flag-img { width: 130px; border-radius: 8px; margin-bottom: 10px; }
+    .flag-img { width: 120px; border-radius: 10px; margin-bottom: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -71,13 +72,14 @@ st.markdown("""
 def load_db():
     for f in os.listdir('.'):
         if f.endswith('.xlsx'):
-            df = pd.read_excel(f); df.columns = df.columns.str.strip()
+            df = pd.read_excel(f)
+            df.columns = df.columns.str.strip()
             return df
     return None
 
 db = load_db()
 
-def engine_elite(q, data):
+def engine_v12(q, data):
     q_low = q.lower()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
     words = re.findall(r'\w+', q_low)
@@ -99,34 +101,35 @@ def engine_elite(q, data):
     if filter_type == 'allot': res = res[res['Notice Type'].isin(STRICT_ALLOT)]
     elif filter_type == 'assig': res = res[res['Notice Type'].isin(STRICT_ASSIG)]
 
-    ans = f"نعم يا بشمهندس، تم رصد {len(res)} سجلات لـ {adms[0]}." if is_ar else f"Yes Engineer, I found {len(res)} records for {adms[0]}."
+    ans = f"نعم يا بشمهندس، تم العثور على {len(res)} سجلات لـ {adms[0]}." if is_ar else f"Yes Engineer, I found {len(res)} records for {adms[0]}."
     return res, adms[0], 100, ans, is_ar
 
-# --- UI Execution ---
-st.title("📡 Seshat AI - Professional Neural Era")
-query = st.text_input("💬 اسأل المساعد الذكي (Neural Voice):")
+# --- UI Layout ---
+query = st.text_input("💬 اسأل Seshat (Neural Voice Mode):")
 
 if db is not None:
     if query:
-        res_df, adm, conf, human_ans, is_arabic = engine_elite(query, db)
+        res_df, adm, conf, human_ans, is_arabic = engine_v12(query, db)
+        
         st.markdown(f"<div style='text-align:center;'><img src='{FLAGS.get(adm, FLAGS['EGY'])}' class='flag-img'></div>", unsafe_allow_html=True)
         st.markdown(f"<div class='ans-card'><h2>{human_ans}</h2></div>", unsafe_allow_html=True)
         
         if res_df is not None:
             st.dataframe(res_df, use_container_width=True)
             
-            # تشغيل الصوت العصبي
+            # محرك الصوت المطور
             if VOICE_READY:
                 try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    audio_bytes = loop.run_until_complete(speak_neural(human_ans, is_arabic))
+                    # الطريقة الأضمن لتشغيل Async جوه Streamlit بدون تضارب
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    audio_bytes = new_loop.run_until_complete(generate_neural_audio(human_ans, is_arabic))
                     st.audio(audio_bytes, format="audio/mp3")
                 except Exception as e:
-                    st.warning("حدث تضارب في الـ Loop، جرب استعلام آخر.")
+                    st.error(f"خطأ في محرك الصوت: {e}")
             else:
-                st.error("المكتبات ناقصة! افتح الـ Terminal واكتب: pip install edge-tts nest_asyncio")
+                st.warning("المكتبات ناقصة. شغل السطر ده في الـ Terminal: pip install edge-tts nest_asyncio")
     else:
         st.markdown(f"<div style='text-align:center;'><img src='{FLAGS['EGY']}' class='flag-img'></div>", unsafe_allow_html=True)
 else:
-    st.error("Data.xlsx missing!")
+    st.error("Data.xlsx not found!")
