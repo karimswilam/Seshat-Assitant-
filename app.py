@@ -2,17 +2,13 @@ import streamlit as st
 import pandas as pd
 import os
 import re
-import asyncio
-import base64
 import random
-import nest_asyncio
-from edge_tts import Communicate
-from difflib import get_close_matches
+import subprocess
+import base64
 
-# 1. تفعيل nest_asyncio لمنع الـ Runtime Errors في Streamlit
-nest_asyncio.apply()
+# --- 1. Master Settings ---
+st.set_page_config(page_title="Seshat Elite v12.1.0", layout="wide")
 
-# --- 2. Flags & Knowledge Mapping ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png",
     'ARS': "https://flagcdn.com/w160/sa.png",
@@ -22,123 +18,66 @@ FLAGS = {
     'ISR': "https://flagcdn.com/w160/il.png"
 }
 
-MASTER_KNOWLEDGE = {
-    'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
-    'FM': ['T01', 'T03', 'T04'],
-    'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
-    'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
-}
-
-STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
-STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1']
-
 SYNONYMS = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
-    'ARS': ['saudi', 'السعودية', 'ksa', 'ars'],
-    'TUR': ['turkey', 'تركيا'],
-    'GRC': ['greece', 'اليونان'],
-    'ISR': ['israel', 'إسرائيل'],
-    'ALLOT_KEY': ['allotment', 'توزيع'],
-    'ASSIG_KEY': ['assignment', 'تخصيص'],
-    'DAB_KEY': ['dab', 'داب'],
-    'TV_KEY': ['tv', 'تلفزيون']
+    'EGY': ['egypt', 'مصر'], 'ARS': ['saudi', 'السعودية', 'ars'],
+    'TUR': ['turkey', 'تركيا'], 'GRC': ['greece', 'اليونان'],
+    'ISR': ['israel', 'إسرائيل', 'isr']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.9", layout="wide")
-
-# --- 3. Neural Voice Engine (Salma & Guy) ---
-async def generate_neural_audio(text, is_ar):
+# --- 2. Robust Voice Engine (No Async Errors) ---
+def speak_neural(text, is_ar):
     voice = "ar-EG-SalmaNeural" if is_ar else "en-US-GuyNeural"
-    communicate = Communicate(text, voice)
-    audio_data = b""
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            audio_data += chunk["data"]
-    return audio_data
+    # إنشاء ملف صوتي مؤقت باستخدام Terminal command
+    try:
+        cmd = f'edge-tts --voice {voice} --text "{text}" --write-media voice.mp3'
+        subprocess.run(cmd, shell=True, check=True)
+        with open("voice.mp3", "rb") as f:
+            data = f.read()
+        b64 = base64.b64encode(data).decode()
+        return f'<audio autoplay src="data:audio/mp3;base64,{b64}">'
+    except:
+        return ""
 
-def autoplay_audio(audio_bytes):
-    b64 = base64.b64encode(audio_bytes).decode()
-    md = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}">'
-    st.markdown(md, unsafe_allow_html=True)
-
-# --- 4. Intelligent Response Generator ---
-def get_dynamic_response(count, adm, is_ar):
-    if is_ar:
-        options = [
-            f"تحليلي لبيانات {adm} أظهر وجود {count} سجلات مطابقة.",
-            f"بالنسبة لطلبك، قاعدة بيانات {adm} تحتوي حالياً على {count} مدخلات.",
-            f"تم رصد {count} نتيجة تخص {adm} بناءً على المعايير المحددة."
-        ]
-    else:
-        options = [
-            f"My analysis shows {count} matching records for {adm}.",
-            f"For your request, the {adm} database currently contains {count} entries.",
-            f"I have identified {count} results for {adm} based on the specified criteria."
-        ]
-    return random.choice(options)
-
-# --- 5. Data Processing ---
+# --- 3. Logic & UI ---
 @st.cache_data
-def load_db():
+def load_data():
     files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
-    if files:
-        df = pd.read_excel(files[0])
-        df.columns = df.columns.str.strip()
-        return df
-    return None
+    return pd.read_excel(files[0]) if files else None
 
-def main_engine(q, data):
-    q_low = q.lower()
-    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
-    words = re.findall(r'\w+', q_low)
-    adms = []; det_svc = None; filter_type = None
+df = load_data()
+query = st.text_input("💬 Ask Seshat (Neural Assistant):")
 
+if df is not None and query:
+    q_low = query.lower()
+    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in query)
+    
+    # تحديد الإدارة
+    target_adm = "EGY"
     for code, keys in SYNONYMS.items():
         if any(k in q_low for k in keys):
-            if code in FLAGS.keys(): adms.append(code)
-            elif code == 'ALLOT_KEY': filter_type = 'allot'
-            elif code == 'ASSIG_KEY': filter_type = 'assig'
-            elif code == 'DAB_KEY': det_svc = 'DAB'
-            elif code == 'TV_KEY': det_svc = 'TV'
-    
-    if not adms: return None, "EGY", "Please specify a country.", is_ar, 0
-
-    res = data[data['Adm'].astype(str).str.contains(adms[0], na=False)]
-    if det_svc: res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
-    if filter_type == 'allot': res = res[res['Notice Type'].isin(STRICT_ALLOT)]
-    elif filter_type == 'assig': res = res[res['Notice Type'].isin(STRICT_ASSIG)]
-
-    ans = get_dynamic_response(len(res), adms[0], is_ar)
-    return res, adms[0], ans, is_ar, 100
-
-# --- 6. UI Rendering ---
-db = load_db()
-query = st.text_input("💬 Ask Seshat (Neural Dynamic Voice Mode):")
-
-if db is not None:
-    if query:
-        res_df, adm_code, response_text, is_arabic, confidence = main_engine(query, db)
-        
-        # Dashboard Style (v12.04 Heritage)
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            st.image(FLAGS.get(adm_code, FLAGS['EGY']), width=120)
-            st.metric("Confidence", f"{confidence}%")
-        with col2:
-            st.markdown(f"### {response_text}")
-
-        if res_df is not None:
-            st.dataframe(res_df, use_container_width=True)
+            target_adm = code
+            break
             
-            # Voice Execution (The Fix)
-            try:
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                audio_content = new_loop.run_until_complete(generate_neural_audio(response_text, is_arabic))
-                autoplay_audio(audio_content)
-            except Exception as e:
-                st.error(f"Voice engine error: {e}")
-    else:
-        st.info("Waiting for your professional inquiry...")
-else:
-    st.error("Data file not found. Please ensure your Excel file is in the root directory.")
+    res = df[df['Adm'].astype(str).str.contains(target_adm, na=False)]
+    
+    # --- العرض (The Dashboard) ---
+    st.markdown("---")
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c1:
+        st.image(FLAGS.get(target_adm), width=150)
+    with c2:
+        # الرد الذكي
+        ans = f"لقد حللت بيانات {target_adm} ووجدت {len(res)} سجلات مطابقة." if is_ar else f"I analyzed {target_adm} data and found {len(res)} matching records."
+        st.subheader(ans)
+    with c3:
+        st.metric("Confidence", "100%")
+    
+    st.markdown("---")
+    st.dataframe(res, use_container_width=True)
+    
+    # تشغيل الصوت في الخلفية (The Hidden Trigger)
+    audio_html = speak_neural(ans, is_ar)
+    st.markdown(audio_html, unsafe_allow_html=True)
+
+elif df is None:
+    st.error("Missing Data.xlsx!")
