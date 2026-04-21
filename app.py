@@ -7,7 +7,7 @@ import asyncio
 import edge_tts
 from difflib import get_close_matches
 
-# --- 1. Flags & Master Data ---
+# --- 1. Flags & Knowledge Mapping ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png",
     'ARS': "https://flagcdn.com/w160/sa.png",
@@ -27,37 +27,36 @@ MASTER_KNOWLEDGE = {
 SYNONYMS = {
     'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
     'ARS': ['saudi', 'ars', 'السعودية', 'ksa'],
-    'TUR': ['turkey', 'tur', 'تركيا'],
+    'TUR': ['turkey', 'tur', 'تركيا', 'türkiye'],
     'CYP': ['cyprus', 'cyp', 'قبرص'],
     'GRC': ['greece', 'grc', 'اليونان', 'يونان'],
     'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'إذاعة صوتية', 't-dab'],
-    'TV_KEY': ['tv', 'تلفزيون', 'تلفزيونية', 'مرئية', 'station']
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'تعيين'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'تنسيب'],
+    'DAB_KEY': ['dab', 'داب', 'صوتية', 'إذاعة صوتية', 't-dab', 'digital sound'],
+    'TV_KEY': ['tv', 'تلفزيون', 'تلفزيونية', 'مرئية', 'station', 'digital tv']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.5 - Human Voice", layout="wide")
+st.set_page_config(page_title="Seshat AI v12.0.6 - Final Pro", layout="wide")
 
-# --- 2. Advanced Human Voice Engine ---
-async def generate_human_voice(text, is_arabic):
-    # نختار الصوت بناءً على اللغة
-    voice = "ar-EG-SalmaNeural" if is_arabic else "en-US-GuyNeural"
-    communicate = edge_tts.Communicate(text, voice)
-    
-    # تحويل الصوت لـ Buffer عشان يشتغل في Streamlit
-    audio_data = b""
-    async for chunk in communicate.stream():
+# --- 2. Ultra-Realistic Voice Engine ---
+async def speak_human(text, is_ar):
+    # اختيار أصوات Neural احترافية
+    v = "ar-EG-SalmaNeural" if is_ar else "en-US-GuyNeural"
+    comm = edge_tts.Communicate(text, v)
+    data = b""
+    async for chunk in comm.stream():
         if chunk["type"] == "audio":
-            audio_data += chunk["data"]
-    return audio_data
+            data += chunk["data"]
+    return data
 
-# --- 3. UI & Logic ---
+# --- 3. Style & UI ---
 st.markdown("""
     <style>
-    .flag-container { text-align: center; padding: 10px; }
-    .flag-img { width: 150px; border-radius: 10px; border: 2px solid #ddd; }
-    .answer-card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+    .main { background: #f0f2f5; }
+    .stTextInput > div > div > input { border-radius: 10px; border: 2px solid #1e3a8a; }
+    .ans-card { background: white; padding: 25px; border-radius: 20px; border-left: 8px solid #1e3a8a; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    .flag-img { width: 140px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -72,12 +71,14 @@ def load_db():
 
 db = load_db()
 
-def engine_v12_5(q, data):
-    q_lower = q.lower()
-    is_arabic = any(char in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for char in q)
-    words = re.findall(r'\w+', q_lower)
+def process_query(q, data):
+    q_low = q.lower()
+    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
+    words = re.findall(r'\w+', q_low)
+    
     adms = []; det_svc = None; filter_type = None
-
+    
+    # Matching
     all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
     for word in words:
         match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
@@ -90,41 +91,48 @@ def engine_v12_5(q, data):
                     elif code == 'DAB_KEY': det_svc = 'DAB'
                     elif code == 'TV_KEY': det_svc = 'TV'
     
-    if 'fm' in words or 'راديو' in q_lower: det_svc = 'FM'
-    if not adms: return None, "EGY", 0, "Unknown Request", is_arabic
+    if 'fm' in words or 'راديو' in q_low: det_svc = 'FM'
+    if not adms: return None, "EGY", 0, "Wait...", is_ar
 
-    # Filter Logic
+    # Core Logic
     res = data[data['Adm'].astype(str).str.contains(adms[0], na=False)]
     if det_svc: res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
-    
-    # Humanized Text Response
+    if filter_type == 'allot': res = res[res['Notice Type'].isin(STRICT_ALLOT)]
+    elif filter_type == 'assig': res = res[res['Notice Type'].isin(STRICT_ASSIG)]
+
+    # Humanized Response Logic
     found = len(res) > 0
-    if is_arabic:
-        ans_text = f"نعم يا هندسة، لقيت {len(res)} سجلات في {adms[0]}." if found else f"للاسف يا هندسة، مفيش سجلات لـ {adms[0]} في الطلب ده."
+    if is_ar:
+        prefix = "نعم يا هندسة،" if found else "للاسف يا هندسة، لا يوجد"
+        ans = f"{prefix} تم العثور على {len(res)} سجلات لـ {adms[0]}."
     else:
-        ans_text = f"Yes, I found {len(res)} records for {adms[0]}." if found else f"No records found for {adms[0]}."
+        prefix = "Yes, sir." if found else "I'm sorry, no"
+        ans = f"{prefix} {len(res)} records found for {adms[0]} based on your query."
+    
+    return res, adms[0], 100, ans, is_ar
 
-    return res, adms[0], 100, ans_text, is_arabic
-
-# --- Main App ---
-user_input = st.text_input("💬 Ask Seshat (Now with Human Voice):")
+# --- App Layout ---
+user_input = st.text_input("📡 Ask Seshat (Professional Voice & Logic):")
 
 if db is not None:
     current_adm = "EGY"
     if user_input:
-        res_df, current_adm, confidence, human_ans, is_ar = engine_v12_5(user_input, db)
+        res_df, top_adm, conf, human_ans, is_arabic = process_query(user_input, db)
         
-        # Display Flag
-        st.markdown(f"<div class='flag-container'><img src='{FLAGS[current_adm]}' class='flag-img'></div>", unsafe_allow_html=True)
+        # Header with Flag
+        st.markdown(f"<div style='text-align:center;'><img src='{FLAGS[top_adm]}' class='flag-img'><br><h3>{top_adm} Analysis</h3></div>", unsafe_allow_html=True)
         
-        st.markdown(f"<div class='answer-card'><h2>{human_ans}</h2></div>", unsafe_allow_html=True)
+        # Result Card
+        st.markdown(f"<div class='ans-card'><h2>{human_ans}</h2><p>Confidence: {conf}%</p></div>", unsafe_allow_html=True)
         
         if not res_df.empty:
             st.dataframe(res_df, use_container_width=True)
             st.bar_chart(res_df['Notice Type'].value_counts())
-            
-            # 🔥 الرهان هنا: توليد الصوت البشري
-            audio_bytes = asyncio.run(generate_human_voice(human_ans, is_ar))
-            st.audio(audio_bytes, format="audio/mp3")
+        
+        # 🎙️ Professional Human Voice
+        try:
+            audio_data = asyncio.run(speak_human(human_ans, is_arabic))
+            st.audio(audio_data, format="audio/mp3")
+        except: pass
     else:
-        st.markdown(f"<div class='flag-container'><img src='{FLAGS['EGY']}' class='flag-img'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:center;'><img src='{FLAGS['EGY']}' class='flag-img'></div>", unsafe_allow_html=True)
