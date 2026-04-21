@@ -8,7 +8,7 @@ import edge_tts
 import nest_asyncio
 from difflib import get_close_matches
 
-# ضروري جداً لتشغيل الـ Async جوه Streamlit بدون مشاكل الـ Loop
+# السطر ده هو "الترياق" للـ Error اللي ظهرلك
 nest_asyncio.apply()
 
 # --- 1. Flags System ---
@@ -41,15 +41,14 @@ SYNONYMS = {
     'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
     'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'تعيين'],
     'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'إذاعة صوتية', 't-dab', 'digital sound'],
-    'TV_KEY': ['tv', 'تلفزيون', 'تلفزيونية', 'مرئية', 'station', 'digital tv']
+    'DAB_KEY': ['dab', 'داب', 'صوتية', 'إذاعة صوتية', 't-dab'],
+    'TV_KEY': ['tv', 'تلفزيون', 'تلفزيونية', 'مرئية']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.5 - Neural Edition", layout="wide")
+st.set_page_config(page_title="Seshat AI v12.0.5", layout="wide")
 
-# --- 3. Neural Voice Function (The Human Voice) ---
-async def get_human_voice(text, is_ar):
-    # نستخدم صوت 'سلمى' للعربي (بشري جداً) وصوت 'Guy' للإنجليزي
+# --- 3. Neural Voice Engine (Fixed Async) ---
+async def generate_voice(text, is_ar):
     voice = "ar-EG-SalmaNeural" if is_ar else "en-US-GuyNeural"
     communicate = edge_tts.Communicate(text, voice)
     audio_data = b""
@@ -58,7 +57,7 @@ async def get_human_voice(text, is_ar):
             audio_data += chunk["data"]
     return audio_data
 
-# CSS Styling
+# CSS
 st.markdown("""
     <style>
     .main { background: #f8f9fa; }
@@ -81,7 +80,7 @@ db = load_db()
 
 def elite_engine(q, data):
     q_lower = q.lower()
-    is_arabic = any(char in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for char in q)
+    is_ar = any(char in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for char in q)
     words = re.findall(r'\w+', q_lower)
     adms = []; det_svc = None; filter_type = None
     
@@ -98,7 +97,7 @@ def elite_engine(q, data):
                     elif code == 'TV_KEY': det_svc = 'TV'
     
     if 'fm' in words or 'راديو' in q_lower: det_svc = 'FM'
-    if not adms: return None, "EGY", 0, "Unknown Request", is_arabic
+    if not adms: return None, "EGY", 0, "عذراً يا بشمهندس، حدد الدولة.", is_ar
 
     res = data[data['Adm'].astype(str).str.contains(adms[0], na=False)]
     if det_svc: res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
@@ -106,42 +105,40 @@ def elite_engine(q, data):
     elif filter_type == 'assig': res = res[res['Notice Type'].isin(STRICT_ASSIG)]
     
     found = len(res) > 0
-    if is_arabic:
-        ans_prefix = "نعم يا بشمهندس، يوجد" if found else "عذراً يا بشمهندس، لا يوجد"
-        ans_text = f"{ans_prefix} {len(res)} سجلات مطابقة لطلبك في {adms[0]}."
+    if is_ar:
+        ans = f"نعم يا بشمهندس، يوجد {len(res)} سجلات في {adms[0]}." if found else f"عذراً يا بشمهندس، لا يوجد نتائج في {adms[0]}."
     else:
-        ans_prefix = "Yes Engineer, there are" if found else "I'm sorry Engineer, there are no"
-        ans_text = f"{ans_prefix} {len(res)} records found for your request in {adms[0]}."
+        ans = f"Yes Engineer, I found {len(res)} records in {adms[0]}." if found else f"No records found in {adms[0]}."
     
-    return res, adms[0], 100, ans_text, is_arabic
+    return res, adms[0], 100, ans, is_ar
 
 # --- UI Layout ---
-user_input = st.text_input("💬 Ask Seshat Professional (Human Voice Mode):", placeholder="Does Israel have FM assignments?")
+user_input = st.text_input("💬 اسأل Seshat (صوت بشري طبيعي):")
 
 if db is not None:
     if user_input:
-        res_df, current_adm, confidence, human_ans, is_ar = elite_engine(user_input, db)
+        res_df, current_adm, conf, human_ans, is_ar = elite_engine(user_input, db)
         
-        # Display Flag
-        flag_url = FLAGS.get(current_adm)
-        st.markdown(f"<div class='flag-container'><img src='{flag_url}' class='flag-img'></div>", unsafe_allow_html=True)
-        
-        # Display Answer Box
-        st.markdown(f"<div class='answer-box'><h3>{human_ans}</h3><p>Engine Confidence: {confidence}%</p></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='flag-container'><img src='{FLAGS[current_adm]}' class='flag-img'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='answer-box'><h3>{human_ans}</h3></div>", unsafe_allow_html=True)
         
         if not res_df.empty:
-            c1, c2 = st.columns([1, 2])
-            with c1: st.metric("Records Found", len(res_df))
-            with c2: st.bar_chart(res_df['Notice Type'].value_counts())
             st.dataframe(res_df, use_container_width=True)
             
-            # --- The Natural Voice Magic ---
+            # --- الإصلاح الجوهري هنا ---
             try:
-                # تشغيل الـ Async loop للحصول على الصوت البشري
-                audio_bytes = asyncio.run(get_human_voice(human_ans, is_ar))
+                # بنحاول نجيب الـ loop اللي شغال فعلاً بدل ما نفتح واحد جديد
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                audio_bytes = loop.run_until_complete(generate_voice(human_ans, is_ar))
                 st.audio(audio_bytes, format="audio/mp3")
             except Exception as e:
-                st.error(f"Voice System Error: {e}")
+                st.error(f"Voice Error: {e}")
     else:
         st.markdown(f"<div class='flag-container'><img src='{FLAGS['EGY']}' class='flag-img'></div>", unsafe_allow_html=True)
-        st.info("System Ready. Waiting for your query, Engineer.")
+else:
+    st.error("Missing Data.xlsx!")
