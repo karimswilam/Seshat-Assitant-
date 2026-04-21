@@ -4,14 +4,18 @@ import os
 import io
 import re
 import asyncio
-import edge_tts
-import nest_asyncio
 from difflib import get_close_matches
 
-# السطر ده هو "الترياق" للـ Error اللي ظهرلك
-nest_asyncio.apply()
+# محاولة استيراد المكتبات المطلوبة للـ Neural Voice
+try:
+    import edge_tts
+    import nest_asyncio
+    nest_asyncio.apply()
+    VOICE_READY = True
+except ImportError:
+    VOICE_READY = False
 
-# --- 1. Flags System ---
+# --- 1. Flags & Intelligence System ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png",
     'ARS': "https://flagcdn.com/w160/sa.png",
@@ -21,9 +25,7 @@ FLAGS = {
     'ISR': "https://flagcdn.com/w160/il.png"
 }
 
-# --- 2. Master Knowledge Base ---
 MASTER_KNOWLEDGE = {
-    'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
     'FM': ['T01', 'T03', 'T04'],
     'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
     'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
@@ -39,16 +41,16 @@ SYNONYMS = {
     'CYP': ['cyprus', 'cyp', 'قبرص'],
     'GRC': ['greece', 'grc', 'اليونان', 'يونان'],
     'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'تعيين'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'إذاعة صوتية', 't-dab'],
-    'TV_KEY': ['tv', 'تلفزيون', 'تلفزيونية', 'مرئية']
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص'],
+    'DAB_KEY': ['dab', 'داب', 'صوتية'],
+    'TV_KEY': ['tv', 'تلفزيون', 'مرئية']
 }
 
 st.set_page_config(page_title="Seshat AI v12.0.5", layout="wide")
 
-# --- 3. Neural Voice Engine (Fixed Async) ---
-async def generate_voice(text, is_ar):
+# --- 2. Neural Voice Logic (Microsoft Neural) ---
+async def speak_neural(text, is_ar):
     voice = "ar-EG-SalmaNeural" if is_ar else "en-US-GuyNeural"
     communicate = edge_tts.Communicate(text, voice)
     audio_data = b""
@@ -57,88 +59,74 @@ async def generate_voice(text, is_ar):
             audio_data += chunk["data"]
     return audio_data
 
-# CSS
+# --- 3. UI Styling ---
 st.markdown("""
     <style>
-    .main { background: #f8f9fa; }
-    .flag-container { text-align: center; padding: 20px; }
-    .flag-img { width: 120px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
-    .answer-box { background: #ffffff; padding: 25px; border-radius: 15px; border-top: 5px solid #1e3a8a; }
+    .ans-card { background: white; padding: 25px; border-radius: 15px; border-left: 10px solid #1e3a8a; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .flag-img { width: 130px; border-radius: 8px; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
 @st.cache_data
 def load_db():
-    files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
-    target = "Data.xlsx" if "Data.xlsx" in files else (files[0] if files else None)
-    if target:
-        df = pd.read_excel(target); df.columns = df.columns.str.strip()
-        return df
+    for f in os.listdir('.'):
+        if f.endswith('.xlsx'):
+            df = pd.read_excel(f); df.columns = df.columns.str.strip()
+            return df
     return None
 
 db = load_db()
 
-def elite_engine(q, data):
-    q_lower = q.lower()
-    is_ar = any(char in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for char in q)
-    words = re.findall(r'\w+', q_lower)
+def engine_elite(q, data):
+    q_low = q.lower()
+    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
+    words = re.findall(r'\w+', q_low)
     adms = []; det_svc = None; filter_type = None
+
+    for code, keys in SYNONYMS.items():
+        if any(k in q_low for k in keys):
+            if code in FLAGS.keys(): adms.append(code)
+            elif code == 'ALLOT_KEY': filter_type = 'allot'
+            elif code == 'ASSIG_KEY': filter_type = 'assig'
+            elif code == 'DAB_KEY': det_svc = 'DAB'
+            elif code == 'TV_KEY': det_svc = 'TV'
     
-    all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
-    for word in words:
-        match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
-        if match:
-            for code, keys in SYNONYMS.items():
-                if match[0] in keys:
-                    if code in FLAGS.keys() and code not in adms: adms.append(code)
-                    elif code == 'ALLOT_KEY': filter_type = 'allot'
-                    elif code == 'ASSIG_KEY': filter_type = 'assig'
-                    elif code == 'DAB_KEY': det_svc = 'DAB'
-                    elif code == 'TV_KEY': det_svc = 'TV'
-    
-    if 'fm' in words or 'راديو' in q_lower: det_svc = 'FM'
-    if not adms: return None, "EGY", 0, "عذراً يا بشمهندس، حدد الدولة.", is_ar
+    if 'fm' in words: det_svc = 'FM'
+    if not adms: return None, "EGY", 0, "برجاء تحديد الدولة يا بشمهندس.", is_ar
 
     res = data[data['Adm'].astype(str).str.contains(adms[0], na=False)]
     if det_svc: res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
     if filter_type == 'allot': res = res[res['Notice Type'].isin(STRICT_ALLOT)]
     elif filter_type == 'assig': res = res[res['Notice Type'].isin(STRICT_ASSIG)]
-    
-    found = len(res) > 0
-    if is_ar:
-        ans = f"نعم يا بشمهندس، يوجد {len(res)} سجلات في {adms[0]}." if found else f"عذراً يا بشمهندس، لا يوجد نتائج في {adms[0]}."
-    else:
-        ans = f"Yes Engineer, I found {len(res)} records in {adms[0]}." if found else f"No records found in {adms[0]}."
-    
+
+    ans = f"نعم يا بشمهندس، تم رصد {len(res)} سجلات لـ {adms[0]}." if is_ar else f"Yes Engineer, I found {len(res)} records for {adms[0]}."
     return res, adms[0], 100, ans, is_ar
 
-# --- UI Layout ---
-user_input = st.text_input("💬 اسأل Seshat (صوت بشري طبيعي):")
+# --- UI Execution ---
+st.title("📡 Seshat AI - Professional Neural Era")
+query = st.text_input("💬 اسأل المساعد الذكي (Neural Voice):")
 
 if db is not None:
-    if user_input:
-        res_df, current_adm, conf, human_ans, is_ar = elite_engine(user_input, db)
+    if query:
+        res_df, adm, conf, human_ans, is_arabic = engine_elite(query, db)
+        st.markdown(f"<div style='text-align:center;'><img src='{FLAGS.get(adm, FLAGS['EGY'])}' class='flag-img'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='ans-card'><h2>{human_ans}</h2></div>", unsafe_allow_html=True)
         
-        st.markdown(f"<div class='flag-container'><img src='{FLAGS[current_adm]}' class='flag-img'></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='answer-box'><h3>{human_ans}</h3></div>", unsafe_allow_html=True)
-        
-        if not res_df.empty:
+        if res_df is not None:
             st.dataframe(res_df, use_container_width=True)
             
-            # --- الإصلاح الجوهري هنا ---
-            try:
-                # بنحاول نجيب الـ loop اللي شغال فعلاً بدل ما نفتح واحد جديد
+            # تشغيل الصوت العصبي
+            if VOICE_READY:
                 try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                
-                audio_bytes = loop.run_until_complete(generate_voice(human_ans, is_ar))
-                st.audio(audio_bytes, format="audio/mp3")
-            except Exception as e:
-                st.error(f"Voice Error: {e}")
+                    audio_bytes = loop.run_until_complete(speak_neural(human_ans, is_arabic))
+                    st.audio(audio_bytes, format="audio/mp3")
+                except Exception as e:
+                    st.warning("حدث تضارب في الـ Loop، جرب استعلام آخر.")
+            else:
+                st.error("المكتبات ناقصة! افتح الـ Terminal واكتب: pip install edge-tts nest_asyncio")
     else:
-        st.markdown(f"<div class='flag-container'><img src='{FLAGS['EGY']}' class='flag-img'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:center;'><img src='{FLAGS['EGY']}' class='flag-img'></div>", unsafe_allow_html=True)
 else:
-    st.error("Missing Data.xlsx!")
+    st.error("Data.xlsx missing!")
