@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
 import os
+import io
 import re
 import tempfile
-import asyncio
 from difflib import get_close_matches
-import edge_tts
+from TTS.api import TTS
 
-# --- Flags ---
+# --- 1. Flags ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png",
     'ARS': "https://flagcdn.com/w160/sa.png",
@@ -17,7 +17,7 @@ FLAGS = {
     'ISR': "https://flagcdn.com/w160/il.png"
 }
 
-# --- Knowledge ---
+# --- 2. Knowledge ---
 MASTER_KNOWLEDGE = {
     'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
     'FM': ['T01', 'T03', 'T04'],
@@ -41,7 +41,7 @@ SYNONYMS = {
     'TV_KEY': ['tv', 'تلفزيون']
 }
 
-st.set_page_config(page_title="Seshat AI - Human Voice", layout="wide")
+st.set_page_config(page_title="Seshat AI - Human Voice Edition", layout="wide")
 
 st.markdown("""
 <style>
@@ -65,17 +65,12 @@ def load_db():
 
 db = load_db()
 
-# --- Voice ---
-async def generate_voice(text, lang):
-    voice = "ar-EG-SalmaNeural" if lang == "ar" else "en-US-GuyNeural"
+# --- Load TTS ---
+@st.cache_resource
+def load_tts():
+    return TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-        path = fp.name
-
-    communicate = edge_tts.Communicate(text=text, voice=voice)
-    await communicate.save(path)
-
-    return path
+tts_model = load_tts()
 
 # --- Engine ---
 def elite_engine(q, data):
@@ -145,11 +140,19 @@ if db is not None:
 
         # --- HUMAN VOICE ---
         try:
-            lang = "ar" if is_ar else "en"
-            audio_path = asyncio.run(generate_voice(ans, lang))
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as fp:
+                path = fp.name
 
-            audio = open(audio_path, "rb").read()
-            st.audio(audio, format="audio/mp3")
+            lang = "ar" if is_ar else "en"
+
+            tts_model.tts_to_file(
+                text=ans,
+                file_path=path,
+                language=lang
+            )
+
+            audio = open(path, "rb").read()
+            st.audio(audio, format="audio/wav")
 
         except Exception as e:
             st.error(e)
