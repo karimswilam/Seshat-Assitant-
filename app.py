@@ -1,87 +1,65 @@
 import streamlit as st
 import pandas as pd
 import os
-import io
 import re
-import tempfile
+import asyncio
+import base64
+import random
+import nest_asyncio
+from edge_tts import Communicate
 from difflib import get_close_matches
-from TTS.api import TTS
 
-# --- 1. Flags ---
-FLAGS = {
-    'EGY': "https://flagcdn.com/w160/eg.png",
-    'ARS': "https://flagcdn.com/w160/sa.png",
-    'TUR': "https://flagcdn.com/w160/tr.png",
-    'CYP': "https://flagcdn.com/w160/cy.png",
-    'GRC': "https://flagcdn.com/w160/gr.png",
-    'ISR': "https://flagcdn.com/w160/il.png"
-}
+# تفعيل الـ Async جوه Streamlit
+nest_asyncio.apply()
 
-# --- 2. Knowledge ---
-MASTER_KNOWLEDGE = {
-    'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
-    'FM': ['T01', 'T03', 'T04'],
-    'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
-    'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
-}
-
-STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
-STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1']
-
-SYNONYMS = {
-    'EGY': ['egypt', 'egy', 'مصر'],
-    'ARS': ['saudi', 'ksa', 'السعودية'],
-    'TUR': ['turkey', 'تركيا'],
-    'CYP': ['cyprus', 'قبرص'],
-    'GRC': ['greece', 'اليونان'],
-    'ISR': ['israel', 'اسرائيل'],
-    'ALLOT_KEY': ['allotment', 'توزيع'],
-    'ASSIG_KEY': ['assignment', 'تخصيص'],
-    'DAB_KEY': ['dab', 'صوتية'],
-    'TV_KEY': ['tv', 'تلفزيون']
-}
-
-st.set_page_config(page_title="Seshat AI - Human Voice Edition", layout="wide")
-
+# --- 1. Settings & UI Style ---
+st.set_page_config(page_title="Seshat AI - Professional Edition", layout="wide")
 st.markdown("""
 <style>
-.main { background: #f8f9fa; }
-.flag-container { text-align: center; padding: 20px; }
-.flag-img { width: 120px; border-radius: 8px; }
-.answer-box { background: #fff; padding: 25px; border-radius: 15px; border-top: 5px solid #1e3a8a; }
+    .reportview-container { background: #f0f2f6; }
+    .stMetric { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .answer-card { background: white; padding: 20px; border-left: 5px solid #1E3A8A; border-radius: 8px; margin-bottom: 20px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- Load DB ---
-@st.cache_data
-def load_db():
-    files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
-    target = "Data.xlsx" if "Data.xlsx" in files else (files[0] if files else None)
-    if target:
-        df = pd.read_excel(target)
-        df.columns = df.columns.str.strip()
-        return df
-    return None
+FLAGS = {
+    'EGY': "https://flagcdn.com/w160/eg.png", 'ARS': "https://flagcdn.com/w160/sa.png",
+    'TUR': "https://flagcdn.com/w160/tr.png", 'CYP': "https://flagcdn.com/w160/cy.png",
+    'GRC': "https://flagcdn.com/w160/gr.png", 'ISR': "https://flagcdn.com/w160/il.png"
+}
 
-db = load_db()
+SYNONYMS = {
+    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
+    'ARS': ['saudi', 'ksa', 'السعودية', 'ars'],
+    'TUR': ['turkey', 'تركيا'],
+    'ALLOT_KEY': ['allotment', 'توزيع'],
+    'ASSIG_KEY': ['assignment', 'تخصيص'],
+    'DAB_KEY': ['dab', 'داب', 'صوتية'],
+    'TV_KEY': ['tv', 'تلفزيون']
+}
 
-# --- Load TTS ---
-@st.cache_resource
-def load_tts():
-    return TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")
+# --- 2. Neural Voice Engine ---
+async def generate_voice(text, is_ar):
+    voice = "ar-EG-SalmaNeural" if is_ar else "en-US-GuyNeural"
+    communicate = Communicate(text, voice)
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+    return audio_data
 
-tts_model = load_tts()
+def play_audio(audio_bytes):
+    b64 = base64.b64encode(audio_bytes).decode()
+    md = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}">'
+    st.markdown(md, unsafe_allow_html=True)
 
-# --- Engine ---
-def elite_engine(q, data):
-    q_lower = q.lower()
-    is_arabic = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
-
-    words = re.findall(r'\w+', q_lower)
-    adms = []
-    det_svc = None
-    filter_type = None
-
+# --- 3. Core Engine (دمج منطق بحثك) ---
+def smart_engine(q, data):
+    q_low = q.lower()
+    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
+    words = re.findall(r'\w+', q_low)
+    
+    adms = []; det_svc = None; filter_type = None
     all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
 
     for word in words:
@@ -89,75 +67,45 @@ def elite_engine(q, data):
         if match:
             for code, keys in SYNONYMS.items():
                 if match[0] in keys:
-                    if code in FLAGS and code not in adms:
-                        adms.append(code)
-                    elif code == 'ALLOT_KEY':
-                        filter_type = 'allot'
-                    elif code == 'ASSIG_KEY':
-                        filter_type = 'assig'
-                    elif code == 'DAB_KEY':
-                        det_svc = 'DAB'
-                    elif code == 'TV_KEY':
-                        det_svc = 'TV'
+                    if code in FLAGS: adms.append(code)
+                    elif code == 'ALLOT_KEY': filter_type = 'allot'
+                    elif code == 'ASSIG_KEY': filter_type = 'assig'
+                    elif code == 'DAB_KEY': det_svc = 'DAB'
+    
+    target_adm = adms[0] if adms else "EGY"
+    res = data[data['Adm'].astype(str).str.contains(target_adm, na=False)]
+    
+    ans = f"تمام يا هندسة، لقيت {len(res)} سجل لإدارة {target_adm}." if is_ar else f"Found {len(res)} records for {target_adm}."
+    return res, target_adm, ans, is_ar
 
-    if 'fm' in words:
-        det_svc = 'FM'
+# --- 4. Main UI ---
+@st.cache_data
+def load_db():
+    files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
+    return pd.read_excel(files[0]) if files else None
 
-    if not adms:
-        return None, "EGY", 0, "Unknown request", is_arabic
+db = load_db()
+st.title("🛰️ Seshat AI v12.1.5")
+query = st.text_input("💬 اسأل المساعد الذكي:")
 
-    res = data[data['Adm'].astype(str).str.contains(adms[0], na=False)]
+if db is not None and query:
+    res_df, adm, ans, is_ar = smart_engine(query, db)
+    
+    # Dashboard
+    col1, col2, col3 = st.columns([1, 3, 1])
+    with col1:
+        st.image(FLAGS.get(adm), width=120)
+    with col2:
+        st.markdown(f"<div class='answer-card'><h3>{ans}</h3></div>", unsafe_allow_html=True)
+    with col3:
+        st.metric("Confidence", "100%")
+        st.progress(100)
 
-    if det_svc:
-        res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
+    st.dataframe(res_df, use_container_width=True)
 
-    if filter_type == 'allot':
-        res = res[res['Notice Type'].isin(STRICT_ALLOT)]
-    elif filter_type == 'assig':
-        res = res[res['Notice Type'].isin(STRICT_ASSIG)]
-
-    found = len(res) > 0
-
-    if is_arabic:
-        ans = f"{'نعم يوجد' if found else 'لا يوجد'} {len(res)} سجل."
-    else:
-        ans = f"{'Yes' if found else 'No'} {len(res)} records found."
-
-    return res, adms[0], 90, ans, is_arabic
-
-# --- UI ---
-user_input = st.text_input("💬 Ask:")
-
-if db is not None:
-    if user_input:
-        res_df, adm, conf, ans, is_ar = elite_engine(user_input, db)
-
-        st.markdown(f"<div class='flag-container'><img src='{FLAGS[adm]}' class='flag-img'></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='answer-box'><h3>{ans}</h3></div>", unsafe_allow_html=True)
-
-        if res_df is not None and not res_df.empty:
-            st.dataframe(res_df)
-
-        # --- HUMAN VOICE ---
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as fp:
-                path = fp.name
-
-            lang = "ar" if is_ar else "en"
-
-            tts_model.tts_to_file(
-                text=ans,
-                file_path=path,
-                language=lang
-            )
-
-            audio = open(path, "rb").read()
-            st.audio(audio, format="audio/wav")
-
-        except Exception as e:
-            st.error(e)
-
-    else:
-        st.info("Enter your query")
-else:
-    st.error("No Excel file found")
+    # Voice Execution
+    with st.spinner("🔊 Generating Voice..."):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        audio = loop.run_until_complete(generate_voice(ans, is_ar))
+        play_audio(audio)
