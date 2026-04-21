@@ -6,7 +6,7 @@ import re
 from gtts import gTTS
 from difflib import get_close_matches
 
-# --- 1. Flags System ---
+# --- 1. Flags & Knowledge Base ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png",
     'ARS': "https://flagcdn.com/w160/sa.png",
@@ -16,7 +16,6 @@ FLAGS = {
     'ISR': "https://flagcdn.com/w160/il.png"
 }
 
-# --- 2. Master Knowledge Base ---
 MASTER_KNOWLEDGE = {
     'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
     'FM': ['T01', 'T03', 'T04'],
@@ -29,18 +28,18 @@ STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1']
 
 SYNONYMS = {
     'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
-    'ARS': ['saudi', 'ars', 'السعودية', 'ksa', 'سعودية'],
+    'ARS': ['saudi', 'ars', 'السعودية', 'ksa'],
     'TUR': ['turkey', 'tur', 'تركيا'],
     'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'GRC': ['greece', 'grc', 'اليونان', 'يونان'],
+    'GRC': ['greece', 'grc', 'اليونان'],
     'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'تعيين'],
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات'],
     'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 't-dab'],
-    'TV_KEY': ['tv', 'تلفزيون', 'مرئية']
+    'DAB_KEY': ['dab', 'داب', 'صوتية'],
+    'TV_KEY': ['tv', 'تلفزيون']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.6 - Deep Analysis", layout="wide")
+st.set_page_config(page_title="Seshat AI v12.0.7 - Hybrid Analysis", layout="wide")
 
 @st.cache_data
 def load_db():
@@ -53,17 +52,15 @@ def load_db():
 
 db = load_db()
 
-def deep_analytical_engine(q, data):
+def hybrid_engine(q, data):
     q_lower = q.lower()
-    is_arabic = any(char in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for char in q)
+    is_ar = any(char in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for char in q)
     words = re.findall(r'\w+', q_lower)
     
-    adms = []; det_svc = None; filter_type = None; exclude_code = None
-    
-    # Matching Logic
+    adms = []; det_svc = None; filter_type = None
     all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
-    for i, word in enumerate(words):
-        if word in ['except', 'ماعدا'] and i+1 < len(words): exclude_code = words[i+1].upper()
+    
+    for word in words:
         match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
         if match:
             for code, keys in SYNONYMS.items():
@@ -73,61 +70,59 @@ def deep_analytical_engine(q, data):
                     elif code == 'ASSIG_KEY': filter_type = 'assig'
                     elif code == 'DAB_KEY': det_svc = 'DAB'
                     elif code == 'TV_KEY': det_svc = 'TV'
+    
+    if 'fm' in words or 'راديو' in q_lower: det_svc = 'FM'
+    if not adms: return None, [], 0, "No ADM found", is_ar
 
-    if 'fm' in words: det_svc = 'FM'
-    if not adms: return None, [], 0, "No Administration detected.", is_arabic
-
-    # filtering
+    # Filtering Logic
     res = data[data['Adm'].isin(adms)]
     if det_svc: res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
-    if exclude_code: res = res[res['Notice Type'] != exclude_code]
 
-    # --- logic الجديد: التفصيل لكل دولة (The Justification) ---
-    report_data = []
-    human_msg = ""
-    
+    # بناء التقرير الهجين
+    report = []
     for adm in adms:
         adm_df = res[res['Adm'] == adm]
-        allots = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
-        assigs = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
+        allot_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
+        assig_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)])
         
-        # بناء نص التقرير
-        if is_arabic:
-            msg = f"الدولة {adm}: إجمالي {len(adm_df)} (تخصيص: {len(assigs)} | توزيع: {len(allots)})"
-        else:
-            msg = f"{adm}: Total {len(adm_df)} (Assig: {len(assigs)} | Allot: {len(allots)})"
-        
-        report_data.append({"adm": adm, "total": len(adm_df), "assig": len(assigs), "allot": len(allots), "msg": msg})
+        report.append({
+            "Administration": adm,
+            "Assignments": assig_count,
+            "Allotments": allot_count,
+            "Total": len(adm_df)
+        })
 
-    final_text = " | ".join([d['msg'] for d in report_data])
-    return res, report_data, 100, final_text, is_arabic
+    ans_text = " | ".join([f"{d['Administration']}: {d['Total']} (Assig:{d['Assignments']}, Allot:{d['Allotments']})" for d in report])
+    return res, report, 100, ans_text, is_ar
 
 # --- UI ---
-user_input = st.text_input("💬 Ask Seshat (Analytical Mode):", placeholder="Compare Egypt and Israel DAB")
+user_input = st.text_input("💬 Hybrid Query (Comparison or Single ADM Analysis):")
 
 if db is not None and user_input:
-    res_df, report, conf, ans_text, is_ar = deep_analytical_engine(user_input, db)
+    res_df, report_list, conf, ans_text, is_ar = hybrid_engine(user_input, db)
     
-    if report:
-        # عرض الأعلام والبيانات لكل دولة بشكل منفصل
-        flag_cols = st.columns(len(report))
-        for i, data in enumerate(report):
-            with flag_cols[i]:
-                st.image(FLAGS.get(data['adm'], ""), width=80)
-                st.metric(data['adm'], f"{data['total']} Records")
-                st.caption(f"Assignments: {data['assig']}")
-                st.caption(f"Allotments: {data['allot']}")
+    if report_list:
+        # 1. Metrics & Flags
+        cols = st.columns(len(report_list))
+        for i, r in enumerate(report_list):
+            with cols[i]:
+                st.image(FLAGS.get(r['Administration']), width=80)
+                st.metric(f"{r['Administration']} Total", r['Total'])
+                st.write(f"✅ Assig: {r['Assignments']}")
+                st.write(f"📋 Allot: {r['Allotments']}")
 
-        st.success(ans_text)
+        # 2. Side-by-Side Bar Chart (The Core Request)
+        st.markdown("### 📊 Statistical Comparison")
+        chart_df = pd.DataFrame(report_list).set_index('Administration')[['Assignments', 'Allotments']]
         
-        # الرسوم البيانية - المقارنة التفصيلية
-        if len(report) > 1:
-            chart_data = pd.DataFrame(report).set_index('adm')[['assig', 'allot']]
-            st.bar_chart(chart_data)
-        
-        st.dataframe(res_df, use_container_width=True)
-        
-        # الصوت
+        # استخدام st.bar_chart مع Dataframe مفصولة يضمن ظهورهم بجانب بعض
+        st.bar_chart(chart_df)
+
+        # 3. Data Details
+        with st.expander("Show Raw Data Table"):
+            st.dataframe(res_df, use_container_width=True)
+
+        # 4. Voice Output
         try:
             tts = gTTS(text=ans_text, lang='ar' if is_ar else 'en')
             b = io.BytesIO(); tts.write_to_fp(b); st.audio(b)
