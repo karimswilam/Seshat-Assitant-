@@ -3,6 +3,4 @@ pandas
 folium
 streamlit-folium
 openpyxl
-TTS
-torch
-soundfile
+edge-tts
