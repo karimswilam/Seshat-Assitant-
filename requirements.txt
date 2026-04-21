@@ -2,5 +2,6 @@ streamlit
 pandas
 folium
 streamlit-folium
-gTTS
 openpyxl
+edge-tts
+nest-asyncio
