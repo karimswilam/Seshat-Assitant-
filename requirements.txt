@@ -2,9 +2,5 @@ streamlit
 pandas
 openpyxl
 rapidfuzz
-piper-tts
-soundfile
+gTTS
 numpy
-SpeechRecognition    # أساسي لتحويل الصوت لكلام (Voice Input)
-pyaudio              # ضروري للتعامل مع المايكروفون محلياً
-gTTS                 # كبديل سريع (Fallback) في حالة فشل Piper
