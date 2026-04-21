@@ -1,6 +1,7 @@
 streamlit
 pandas
-folium
-streamlit-folium
-gTTS
 openpyxl
+rapidfuzz
+piper-tts
+soundfile
+numpy
