@@ -6,8 +6,8 @@ import re
 from gtts import gTTS
 from difflib import get_close_matches
 
-# --- 1. CONFIG & STRICT CLASSIFICATION ---
-st.set_page_config(layout="wide", page_title="Seshat AI v13.2.2")
+# --- 1. CONFIG & STRICT RULES ---
+st.set_page_config(layout="wide", page_title="Seshat AI v13.2.3")
 
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png", 'ARS': "https://flagcdn.com/w160/sa.png",
@@ -17,10 +17,8 @@ FLAGS = {
 
 STOP_WORDS = ['does', 'is', 'how', 'many', 'have', 'has', 'show', 'give', 'me', 'the', 'between', 'compared', 'to']
 
-# التصنيف القاطع - لا رجعة فيه
-# الـ GT1 و الـ GS1 تخصيصات (Assignments) دايماً
+# التصنيف القاطع
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01'] 
-# الـ GT2 و الـ GS2 توزيعات (Allotments) دايماً
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
 
 MASTER_KNOWLEDGE = {
@@ -50,19 +48,20 @@ def load_db():
 
 db = load_db()
 
-def final_strict_engine(q, data):
+def final_selective_engine(q, data):
     q_low = q.lower()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
-    
     clean_q = re.sub(r'\b(' + '|'.join(STOP_WORDS) + r')\b', '', q_low)
     words = re.findall(r'\w+', clean_q)
     
     selected_adms = []; services = []
+    # كشف صريح للنية
     wants_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
     wants_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
     
-    if not wants_assig and not wants_allot:
-        wants_assig = wants_allot = True
+    # لو مسألش عن حاجة معينة، يعرض الاتنين، لكن لو حدد، نلتزم باللي حدده
+    specific_intent = True if (wants_assig or wants_allot) else False
+    if not specific_intent: wants_assig = wants_allot = True
 
     all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
     for word in words:
@@ -78,7 +77,7 @@ def final_strict_engine(q, data):
                     elif code == 'TV_KEY': services.append('TV')
                     elif code == 'FM_KEY': services.append('FM')
 
-    if not selected_adms: return None, [], 0, "No ADM identified", is_ar, False
+    if not selected_adms: return None, [], 0, "Specify ADM", is_ar, False
 
     reports = []; final_df = pd.DataFrame()
     services = list(set(services)) if services else ['SOUND', 'TV']
@@ -90,40 +89,57 @@ def final_strict_engine(q, data):
             svc_df = adm_df[adm_df['Notice Type'].isin(svc_codes)]
             
             row = {"Administration": f"{adm} ({svc})"}
-            # الحساب بناءً على الـ Strict Lists المعدلة
             a_count = len(svc_df[svc_df['Notice Type'].isin(STRICT_ASSIG)])
             l_count = len(svc_df[svc_df['Notice Type'].isin(STRICT_ALLOT)])
             
+            # فلترة الأعمدة بناءً على السؤال
             if wants_assig: row["Assignments"] = a_count
             if wants_allot: row["Allotments"] = l_count
             
-            if (wants_assig and a_count >= 0) or (wants_allot and l_count >= 0):
+            # إضافة الصف فقط إذا كان يحتوي على داتا مطلوبة
+            if (wants_assig and a_count > 0) or (wants_allot and l_count > 0):
                 reports.append(row)
-                final_df = pd.concat([final_df, svc_df])
+                # فلترة الداتا التفصيلية برضه عشان الـ GT1 متظهرش لو بنسأل عن Allotments
+                if wants_allot and not wants_assig:
+                    final_df = pd.concat([final_df, svc_df[svc_df['Notice Type'].isin(STRICT_ALLOT)]])
+                elif wants_assig and not wants_allot:
+                    final_df = pd.concat([final_df, svc_df[svc_df['Notice Type'].isin(STRICT_ASSIG)]])
+                else:
+                    final_df = pd.concat([final_df, svc_df])
 
-    msg = " | ".join([f"{r['Administration']}: {r.get('Assignments',0)} Assig, {r.get('Allotments',0)} Allot" for r in reports])
+    msg = " | ".join([f"{r['Administration']}: {r.get('Assignments',0) if wants_assig else ''} {r.get('Allotments',0) if wants_allot else ''}" for r in reports])
     return final_df, reports, 100, msg, is_ar, True
 
-# --- 3. UI ---
-query = st.text_input("💬 Ask Seshat (Strict Classification Mode):")
+# --- UI ---
+query = st.text_input("💬 Ask Seshat (Specific Type Filter):")
 
 if db is not None and query:
-    res_df, reports, conf, msg, is_ar, logical = final_strict_engine(query, db)
+    res_df, reports, conf, msg, is_ar, logical = final_selective_engine(query, db)
     
-    if logical:
+    if logical and reports:
+        # Dashboard Header
         c1, c2 = st.columns([3, 1])
         with c1:
             adms = list(set([r['Administration'].split()[0] for r in reports]))
-            f_cols = st.columns(len(adms) if adms else 1)
-            for i, a in enumerate(adms): f_cols[i].image(FLAGS.get(a), width=70, caption=a)
+            f_cols = st.columns(len(adms))
+            for i, a in enumerate(adms): f_cols[i].image(FLAGS.get(a), width=70)
         with c2: st.metric("Confidence", f"{conf}%")
 
-        st.info(f"📋 {msg}")
+        # Tables & Charts
         chart_df = pd.DataFrame(reports).set_index('Administration')
-        st.bar_chart(chart_df)
-        st.table(chart_df) # الأرقام هنا هتظهر الـ GT1 في الـ Assignments صح
+        
+        # أهم تعديل: حذف الأعمدة اللي مكنتش مطلوبة من السؤال
+        cols_to_keep = []
+        if "assignment" in query.lower() or "تخصيص" in query: cols_to_keep.append("Assignments")
+        if "allotment" in query.lower() or "توزيع" in query: cols_to_keep.append("Allotments")
+        
+        # لو حدد نوع معين، نظهر ده بس
+        display_df = chart_df[cols_to_keep] if cols_to_keep else chart_df
 
-        with st.expander("Show Details"):
+        st.bar_chart(display_df)
+        st.table(display_df) # كدا الـ GT1 هتختفي تماماً لو سألت عن Allotments
+
+        with st.expander("Show Detailed Records"):
             st.dataframe(res_df, use_container_width=True)
 
         try:
