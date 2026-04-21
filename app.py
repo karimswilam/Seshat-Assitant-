@@ -2,13 +2,12 @@ import streamlit as st
 import pandas as pd
 import os
 import re
-import random
-import subprocess
-import base64
+import tempfile
+import asyncio
+from difflib import get_close_matches
+import edge_tts
 
-# --- 1. Master Settings ---
-st.set_page_config(page_title="Seshat Elite v12.1.0", layout="wide")
-
+# --- Flags ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w160/eg.png",
     'ARS': "https://flagcdn.com/w160/sa.png",
@@ -18,66 +17,144 @@ FLAGS = {
     'ISR': "https://flagcdn.com/w160/il.png"
 }
 
-SYNONYMS = {
-    'EGY': ['egypt', 'مصر'], 'ARS': ['saudi', 'السعودية', 'ars'],
-    'TUR': ['turkey', 'تركيا'], 'GRC': ['greece', 'اليونان'],
-    'ISR': ['israel', 'إسرائيل', 'isr']
+# --- Knowledge ---
+MASTER_KNOWLEDGE = {
+    'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
+    'FM': ['T01', 'T03', 'T04'],
+    'DAB': ['GS1', 'GS2', 'DS1', 'DS2'],
+    'TV': ['T02', 'G02', 'GT1', 'GT2', 'DT1', 'DT2'],
 }
 
-# --- 2. Robust Voice Engine (No Async Errors) ---
-def speak_neural(text, is_ar):
-    voice = "ar-EG-SalmaNeural" if is_ar else "en-US-GuyNeural"
-    # إنشاء ملف صوتي مؤقت باستخدام Terminal command
-    try:
-        cmd = f'edge-tts --voice {voice} --text "{text}" --write-media voice.mp3'
-        subprocess.run(cmd, shell=True, check=True)
-        with open("voice.mp3", "rb") as f:
-            data = f.read()
-        b64 = base64.b64encode(data).decode()
-        return f'<audio autoplay src="data:audio/mp3;base64,{b64}">'
-    except:
-        return ""
+STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
+STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1']
 
-# --- 3. Logic & UI ---
+SYNONYMS = {
+    'EGY': ['egypt', 'egy', 'مصر'],
+    'ARS': ['saudi', 'ksa', 'السعودية'],
+    'TUR': ['turkey', 'تركيا'],
+    'CYP': ['cyprus', 'قبرص'],
+    'GRC': ['greece', 'اليونان'],
+    'ISR': ['israel', 'اسرائيل'],
+    'ALLOT_KEY': ['allotment', 'توزيع'],
+    'ASSIG_KEY': ['assignment', 'تخصيص'],
+    'DAB_KEY': ['dab', 'صوتية'],
+    'TV_KEY': ['tv', 'تلفزيون']
+}
+
+st.set_page_config(page_title="Seshat AI - Human Voice", layout="wide")
+
+st.markdown("""
+<style>
+.main { background: #f8f9fa; }
+.flag-container { text-align: center; padding: 20px; }
+.flag-img { width: 120px; border-radius: 8px; }
+.answer-box { background: #fff; padding: 25px; border-radius: 15px; border-top: 5px solid #1e3a8a; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- Load DB ---
 @st.cache_data
-def load_data():
+def load_db():
     files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
-    return pd.read_excel(files[0]) if files else None
+    target = "Data.xlsx" if "Data.xlsx" in files else (files[0] if files else None)
+    if target:
+        df = pd.read_excel(target)
+        df.columns = df.columns.str.strip()
+        return df
+    return None
 
-df = load_data()
-query = st.text_input("💬 Ask Seshat (Neural Assistant):")
+db = load_db()
 
-if df is not None and query:
-    q_low = query.lower()
-    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in query)
-    
-    # تحديد الإدارة
-    target_adm = "EGY"
-    for code, keys in SYNONYMS.items():
-        if any(k in q_low for k in keys):
-            target_adm = code
-            break
-            
-    res = df[df['Adm'].astype(str).str.contains(target_adm, na=False)]
-    
-    # --- العرض (The Dashboard) ---
-    st.markdown("---")
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c1:
-        st.image(FLAGS.get(target_adm), width=150)
-    with c2:
-        # الرد الذكي
-        ans = f"لقد حللت بيانات {target_adm} ووجدت {len(res)} سجلات مطابقة." if is_ar else f"I analyzed {target_adm} data and found {len(res)} matching records."
-        st.subheader(ans)
-    with c3:
-        st.metric("Confidence", "100%")
-    
-    st.markdown("---")
-    st.dataframe(res, use_container_width=True)
-    
-    # تشغيل الصوت في الخلفية (The Hidden Trigger)
-    audio_html = speak_neural(ans, is_ar)
-    st.markdown(audio_html, unsafe_allow_html=True)
+# --- Voice ---
+async def generate_voice(text, lang):
+    voice = "ar-EG-SalmaNeural" if lang == "ar" else "en-US-GuyNeural"
 
-elif df is None:
-    st.error("Missing Data.xlsx!")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+        path = fp.name
+
+    communicate = edge_tts.Communicate(text=text, voice=voice)
+    await communicate.save(path)
+
+    return path
+
+# --- Engine ---
+def elite_engine(q, data):
+    q_lower = q.lower()
+    is_arabic = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
+
+    words = re.findall(r'\w+', q_lower)
+    adms = []
+    det_svc = None
+    filter_type = None
+
+    all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
+
+    for word in words:
+        match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
+        if match:
+            for code, keys in SYNONYMS.items():
+                if match[0] in keys:
+                    if code in FLAGS and code not in adms:
+                        adms.append(code)
+                    elif code == 'ALLOT_KEY':
+                        filter_type = 'allot'
+                    elif code == 'ASSIG_KEY':
+                        filter_type = 'assig'
+                    elif code == 'DAB_KEY':
+                        det_svc = 'DAB'
+                    elif code == 'TV_KEY':
+                        det_svc = 'TV'
+
+    if 'fm' in words:
+        det_svc = 'FM'
+
+    if not adms:
+        return None, "EGY", 0, "Unknown request", is_arabic
+
+    res = data[data['Adm'].astype(str).str.contains(adms[0], na=False)]
+
+    if det_svc:
+        res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
+
+    if filter_type == 'allot':
+        res = res[res['Notice Type'].isin(STRICT_ALLOT)]
+    elif filter_type == 'assig':
+        res = res[res['Notice Type'].isin(STRICT_ASSIG)]
+
+    found = len(res) > 0
+
+    if is_arabic:
+        ans = f"{'نعم يوجد' if found else 'لا يوجد'} {len(res)} سجل."
+    else:
+        ans = f"{'Yes' if found else 'No'} {len(res)} records found."
+
+    return res, adms[0], 90, ans, is_arabic
+
+# --- UI ---
+user_input = st.text_input("💬 Ask:")
+
+if db is not None:
+    if user_input:
+        res_df, adm, conf, ans, is_ar = elite_engine(user_input, db)
+
+        st.markdown(f"<div class='flag-container'><img src='{FLAGS[adm]}' class='flag-img'></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='answer-box'><h3>{ans}</h3></div>", unsafe_allow_html=True)
+
+        if res_df is not None and not res_df.empty:
+            st.dataframe(res_df)
+
+        # --- HUMAN VOICE ---
+        try:
+            lang = "ar" if is_ar else "en"
+            audio_path = asyncio.run(generate_voice(ans, lang))
+
+            audio = open(audio_path, "rb").read()
+            st.audio(audio, format="audio/mp3")
+
+        except Exception as e:
+            st.error(e)
+
+    else:
+        st.info("Enter your query")
+else:
+    st.error("No Excel file found")
