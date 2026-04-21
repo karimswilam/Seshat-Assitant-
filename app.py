@@ -17,37 +17,37 @@ MASTER_KNOWLEDGE = {
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1']
 
-# قاموس الأعلام والرموز
-ADM_MAP = {
-    'EGY': {'name': 'Egypt', 'flag': '🇪🇬'},
-    'ARS': {'name': 'Saudi Arabia', 'flag': '🇸🇦'},
-    'TUR': {'name': 'Turkey', 'flag': '🇹🇷'},
-    'CYP': {'name': 'Cyprus', 'flag': '🇨🇾'},
-    'GRC': {'name': 'Greece', 'flag': '🇬🇷'},
-    'ISR': {'name': 'Israel', 'flag': '🇮🇱'}
+# 2. قاعدة بيانات الأعلام (ADM Flags)
+ADM_DETAILS = {
+    'EGY': {'flag': '🇪🇬', 'name': 'Egypt'},
+    'ARS': {'flag': '🇸🇦', 'name': 'Saudi Arabia'},
+    'TUR': {'flag': '🇹🇷', 'name': 'Turkey'},
+    'CYP': {'flag': '🇨🇾', 'name': 'Cyprus'},
+    'GRC': {'flag': '🇬🇷', 'name': 'Greece'},
+    'ISR': {'flag': '🇮🇱', 'name': 'Israel'}
 }
 
 SYNONYMS = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية', 'egibt'],
-    'ARS': ['saudi', 'ars', 'السعودية', 'ksa', 'المملكة'],
+    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
+    'ARS': ['saudi', 'ars', 'السعودية', 'ksa'],
     'TUR': ['turkey', 'tur', 'تركيا', 'türkiye'],
     'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'GRC': ['greece', 'grc', 'اليونان', 'يونان', 'المرئية'],
+    'GRC': ['greece', 'grc', 'اليونان', 'يونان'],
     'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
     'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'تعيين'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'تنسيب'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'إذاعة', 't-dab', 'digital sound'],
-    'TV_KEY': ['tv', 'تلفزيون', 'تلفزيونية', 'مرئية', 'digital tv', 'station']
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
+    'DAB_KEY': ['dab', 'داب', 'صوتية', 'إذاعة صوتية', 't-dab'],
+    'TV_KEY': ['tv', 'تلفزيون', 'تلفزيونية', 'مرئية', 'station']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.3 - Professional", layout="wide")
+st.set_page_config(page_title="Seshat AI v12.0.3_Stable", layout="wide")
 
-# تحسين الواجهة بـ CSS
+# CSS Pro Interface
 st.markdown("""
     <style>
-    .main { background-color: #f5f7f9; }
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .flag-header { font-size: 50px; text-align: center; margin-bottom: 20px; }
+    .reportview-container { background: #f0f2f6; }
+    .flag-box { font-size: 80px; text-align: center; padding: 10px; background: white; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    .stat-card { background: white; padding: 20px; border-radius: 10px; border-left: 5px solid #1f77b4; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -62,72 +62,84 @@ def load_db():
 
 db = load_db()
 
-def engine_v12_0_3(q, data):
+def engine_v12_stable(q, data):
     q_clean = q.lower().replace('؟', '').replace('?', '').strip()
     words = re.findall(r'\w+', q_clean)
     
     adms = []; det_svc = None; filter_type = None; exclude_codes = []
     
-    # 1. لقط العناصر
+    # Matching Logic
     all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
     for word in words:
-        match = get_close_matches(word, all_keys, n=1, cutoff=0.75)
+        match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
         if match:
             for code, keys in SYNONYMS.items():
                 if match[0] in keys:
-                    if code in ADM_MAP.keys() and code not in adms: adms.append(code)
+                    if code in ADM_DETAILS.keys() and code not in adms: adms.append(code)
                     elif code == 'ALLOT_KEY': filter_type = 'allot'
                     elif code == 'ASSIG_KEY': filter_type = 'assig'
                     elif code == 'DAB_KEY': det_svc = 'DAB'
                     elif code == 'TV_KEY': det_svc = 'TV'
+    
+    # Force FM detection if not DAB or TV
+    if 'fm' in words or 'راديو' in q_clean: det_svc = 'FM'
 
-    # 2. الاستبعادات
-    if 'ماعدا' in q_clean or 'except' in q_clean:
-        exclude_codes = [w.upper() for w in words if len(w) <= 4 and any(w.upper() in v for v in MASTER_KNOWLEDGE.values())]
+    if not adms: return None, "EGY", 0, "No country detected."
 
-    if not adms: return None, "EGY", 0, "Specify a country."
-
-    # 3. التصفية والحساب
+    # Filtering
     stats = {}
     final_dfs = []
     for adm in adms:
         res = data[data['Adm'].astype(str).str.contains(adm, na=False)]
-        if det_svc: res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
-        if filter_type == 'allot': res = res[res['Notice Type'].isin(STRICT_ALLOT)]
-        elif filter_type == 'assig': res = res[res['Notice Type'].isin(STRICT_ASSIG)]
-        if exclude_codes: res = res[~res['Notice Type'].isin(exclude_codes)]
-        stats[adm] = len(res); final_dfs.append(res)
+        if det_svc:
+            res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
+        if filter_type == 'allot':
+            res = res[res['Notice Type'].isin(STRICT_ALLOT)]
+        elif filter_type == 'assig':
+            res = res[res['Notice Type'].isin(STRICT_ASSIG)]
+        
+        stats[adm] = len(res)
+        final_dfs.append(res)
 
-    # حساب الثقة (Confidence) بشكل أذكى
-    conf = 100 if (adms and (det_svc or filter_type)) else 75
-    
-    return pd.concat(final_dfs), adms[0], conf, f"Results for {adms}"
+    conf = 100 if (adms and det_svc) else 80
+    return pd.concat(final_dfs), adms[0], conf, stats
 
-# --- الواجهة الرسومية ---
-user_input = st.text_input("📡 Regulatory Query (e.g., تخصيصات اليونان مرئية):")
+# --- UI Execution ---
+user_query = st.text_input("🔍 Search Regulatory Data:", placeholder="e.g., تخصيصات اليونان المرئية")
 
 if db is not None:
-    res_df, active_adm, confidence, msg = engine_v12_0_3(user_input if user_input else "EGY", db)
+    # Default state is Egypt
+    active_input = user_query if user_query else "Egypt"
+    res_df, top_adm, confidence, stats_data = engine_v12_stable(active_input, db)
     
-    # عرض العلم
-    flag = ADM_MAP.get(active_adm, {'flag': '🇪🇬'})['flag']
-    st.markdown(f"<div class='flag-header'>{flag}</div>", unsafe_allow_html=True)
+    # Display Flag Dashboard
+    flag_icon = ADM_DETAILS.get(top_adm, {'flag': '🇪🇬'})['flag']
+    adm_name = ADM_DETAILS.get(top_adm, {'name': 'Egypt'})['name']
     
-    st.progress(confidence / 100)
-    st.write(f"**Confidence Level:** {confidence}%")
+    st.markdown(f"<div class='flag-box'>{flag_icon}<br><span style='font-size:20px;'>{adm_name}</span></div>", unsafe_allow_html=True)
     
-    if user_input:
-        st.info(msg)
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            st.metric("Records Found", len(res_df))
-        with c2:
-            if not res_df.empty: st.bar_chart(res_df['Notice Type'].value_counts())
+    if user_query:
+        st.progress(confidence / 100)
+        st.write(f"**Engine Confidence:** {confidence}%")
         
-        st.dataframe(res_df)
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.markdown(f"<div class='stat-card'><h3>{len(res_df)}</h3><p>Records Found</p></div>", unsafe_allow_html=True)
+            if len(stats_data) > 1:
+                st.write("---")
+                for a, c in stats_data.items(): st.write(f"{ADM_DETAILS[a]['flag']} {a}: {c}")
         
-        # Voice
+        with col2:
+            if not res_df.empty:
+                st.bar_chart(res_df['Notice Type'].value_counts())
+            else:
+                st.warning("No records match your specific filters.")
+
+        st.dataframe(res_df, use_container_width=True)
+        
+        # Audio Result
+        v_txt = f"Found {len(res_df)} records for {adm_name}."
         try:
-            tts = gTTS(text=f"Found {len(res_df)} records.", lang='en')
+            tts = gTTS(text=v_txt, lang='en')
             b = io.BytesIO(); tts.write_to_fp(b); st.audio(b)
         except: pass
