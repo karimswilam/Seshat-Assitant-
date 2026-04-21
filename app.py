@@ -6,7 +6,7 @@ import re
 from gtts import gTTS
 from difflib import get_close_matches
 
-# 1. الدستور الهندسي المعتمد
+# 1. الدستور الهندسي (المرجع الصارم)
 MASTER_KNOWLEDGE = {
     'SOUND': ['T01', 'T03', 'T04', 'GS1', 'GS2', 'DS1', 'DS2'],
     'FM': ['T01', 'T03', 'T04'],
@@ -23,13 +23,14 @@ SYNONYMS = {
     'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
     'ARS': ['saudi', 'ars', 'السعودية', 'ksa', 'المملكة'],
     'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل'],
-    'TUR': ['turkey', 'tur', 'تركيا', 'türkiye'],
+    'TUR': ['turkey', 'tur', 'تركيا'],
     'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'ALLOT_KEY': ['allotment', 'allotments', 'تعيين', 'توزيع', 'توزيعات'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'تنسيب']
+    'ALLOT_KEY': ['allotment', 'allotments', 'تعيين', 'توزيع', 'توزيعات', 'allot'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'تنسيب', 'assign'],
+    'TOTAL_KEY': ['total', 'count', 'sum', 'إجمالي', 'عدد', 'مجموع', 'كل']
 }
 
-st.set_page_config(page_title="Seshat AI v12.0.1 - Comparison Mode", layout="wide")
+st.set_page_config(page_title="Seshat AI v12.0.2 - Precision Logic", layout="wide")
 
 @st.cache_data
 def load_db():
@@ -43,96 +44,95 @@ def load_db():
 
 db = load_db()
 
-def advanced_logic_v12_0_1(q, data):
-    q_clean = re.sub(r'[?؟.!]', '', q.lower()).strip()
-    words = q_clean.split()
+def engine_v12_0_2(q, data):
+    # تنظيف السؤال ومعالجة النصوص المختلطة
+    q_clean = q.lower().replace('؟', '').replace('?', '').strip()
+    words = re.findall(r'\w+', q_clean) # استخراج الكلمات بدقة مهما كان الترتيب
     
     adms = []; det_svc = None; filter_type = None; exclude_codes = []
     
-    # 1. لقط الدول (Multi-Country detection)
+    # 1. لقط الدول والكلمات المفتاحية
     all_keys = [item for sublist in SYNONYMS.values() for item in sublist]
     for word in words:
         match = get_close_matches(word, all_keys, n=1, cutoff=0.8)
         if match:
             for code, keys in SYNONYMS.items():
                 if match[0] in keys:
-                    if code in ['EGY', 'ARS', 'ISR', 'TUR', 'CYP']:
-                        if code not in adms: adms.append(code)
+                    if code in ['EGY', 'ARS', 'ISR', 'TUR', 'CYP'] and code not in adms: adms.append(code)
                     elif code == 'ALLOT_KEY': filter_type = 'allot'
                     elif code == 'ASSIG_KEY': filter_type = 'assig'
     
-    # 2. لقط الخدمة والاستبعادات
-    for svc in MASTER_KNOWLEDGE.keys():
-        if svc.lower().replace("_", " ") in q_clean or (svc == 'FM' and 'راديو' in q_clean) or (svc == 'DAB' and 'داب' in q_clean):
-            det_svc = svc; break
-    
+    # 2. تحديد الخدمة (إلزامي لضمان عدم خلط الأكواد)
+    if 'fm' in words or 'راديو' in q_clean: det_svc = 'FM'
+    elif 'dab' in words or 'داب' in q_clean: det_svc = 'DAB'
+    elif 'tv' in words or 'تلفزيون' in q_clean: det_svc = 'TV'
+
+    # 3. الاستبعادات
     if 'ماعدا' in q_clean or 'except' in q_clean:
-        exclude_codes = [w.upper() for w in words if len(w) <= 4 and any(w.upper() in codes for codes in MASTER_KNOWLEDGE.values())]
+        exclude_codes = [w.upper() for w in words if len(w) <= 4 and any(w.upper() in v for v in MASTER_KNOWLEDGE.values())]
 
-    if not adms: return None, "Please specify at least one country.", 0, None, None
+    if not adms: return None, "Please specify a country.", 0, {}
 
-    # 3. محرك المقارنة والحسابات
-    results_map = {}
+    # 4. التصفية الصارمة (Strict Intersection)
+    stats = {}
+    final_dfs = []
     for adm in adms:
-        temp_res = data[data['Adm'].astype(str).str.contains(adm, na=False)]
-        if det_svc: temp_res = temp_res[temp_res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
-        if filter_type == 'allot': temp_res = temp_res[temp_res['Notice Type'].isin(STRICT_ALLOT)]
-        elif filter_type == 'assig': temp_res = temp_res[temp_res['Notice Type'].isin(STRICT_ASSIG)]
-        if exclude_codes: temp_res = temp_res[~temp_res['Notice Type'].isin(exclude_codes)]
-        results_map[adm] = temp_res
+        res = data[data['Adm'].astype(str).str.contains(adm, na=False)]
+        
+        # تطبيق الخدمة (Service Filter)
+        if det_svc:
+            res = res[res['Notice Type'].isin(MASTER_KNOWLEDGE[det_svc])]
+        
+        # تطبيق التخصيص/التعيين (Type Filter)
+        if filter_type == 'allot':
+            res = res[res['Notice Type'].isin(STRICT_ALLOT)]
+        elif filter_type == 'assig':
+            res = res[res['Notice Type'].isin(STRICT_ASSIG)]
+            
+        if exclude_codes:
+            res = res[~res['Notice Type'].isin(exclude_codes)]
+            
+        stats[adm] = len(res)
+        final_dfs.append(res)
 
-    # إعداد البيانات للعرض
-    final_df = pd.concat(results_map.values())
-    conf = min(len(adms)*30 + (20 if det_svc else 0) + (20 if filter_type else 0), 100)
+    final_df = pd.concat(final_dfs) if final_dfs else pd.DataFrame()
     
-    counts = {k: len(v) for k, v in results_map.items()}
-    math_info = ""
-    if len(adms) > 1:
-        diff = max(counts.values()) - min(counts.values())
-        math_info = f"📊 Comparison: {counts} | Difference: {diff} records."
-    else:
-        math_info = f"Total records for {adms[0]}: {counts[adms[0]]}"
+    # حساب الثقة بناءً على وضوح الخدمة والنوع والدولة
+    conf = (50 if adms else 0) + (25 if det_svc else 0) + (25 if filter_type else 0)
+    
+    msg = f"Analysis for {', '.join(adms)} | Service: {det_svc if det_svc else 'All'} | Type: {filter_type if filter_type else 'All'}"
+    return final_df, msg, conf, stats
 
-    return final_df, f"Analysis for: {', '.join(adms)}", conf, math_info, counts
-
-st.title("📡 Seshat AI v12.0.1 - Comparison Master")
-user_input = st.text_input("Ask (e.g., قارن بين مصر وقبرص في توزيعات التلفزيون):")
+st.title("📡 Seshat AI v12.0.2 - Precision Analytics")
+user_input = st.text_input("Enter your query (Arabic/English/Mixed):")
 
 if db is not None and user_input:
-    res_df, message, confidence, math_msg, stats = advanced_logic_v12_0_1(user_input, db)
+    res_df, msg, conf, stats = engine_v12_0_2(user_input, db)
     
-    # 1. Confidence Indicator
-    st.progress(confidence / 100)
-    st.write(f"**Confidence Indicator:** {confidence}%")
+    st.progress(conf / 100)
+    st.write(f"**Confidence:** {conf}%")
     
     if res_df is not None:
-        st.info(message)
-        if math_msg: st.success(math_msg)
+        st.info(msg)
         
-        # 2. Visual Dashboard
+        # عرض النتائج الحسابية
+        if len(stats) > 1:
+            diff = max(stats.values()) - min(stats.values())
+            st.success(f"📊 Comparison Results: {stats} | Difference: {diff}")
+        
         c1, c2 = st.columns([1, 2])
         with c1:
-            st.metric("Total Rows in View", len(res_df))
-            for adm, count in stats.items():
-                st.write(f"📍 {adm}: {count}")
+            st.metric("Total Records", len(res_df))
+            for a, c in stats.items(): st.write(f"📍 {a}: {c}")
         with c2:
             if not res_df.empty:
-                if len(stats) > 1:
-                    st.subheader("Visual Comparison by Country")
-                    # رسم بياني للمقارنة بين الدولتين
-                    st.bar_chart(pd.Series(stats))
-                else:
-                    st.subheader("Notice Type Distribution")
-                    st.bar_chart(res_df['Notice Type'].value_counts())
-        
-        # 3. Data Table
+                st.bar_chart(pd.Series(stats) if len(stats) > 1 else res_df['Notice Type'].value_counts())
+
         st.dataframe(res_df)
         
-        # 4. Voice Output
+        # Voice Output
         try:
-            v_txt = f"Analysis complete. {math_msg}"
-            tts = gTTS(text=v_txt, lang='en')
+            v_msg = f"Found {len(res_df)} records. " + (f"Difference is {diff}" if len(stats)>1 else "")
+            tts = gTTS(text=v_msg, lang='en')
             b = io.BytesIO(); tts.write_to_fp(b); st.audio(b)
         except: pass
-    else:
-        st.error(message)
