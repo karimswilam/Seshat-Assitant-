@@ -15,10 +15,10 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v16.8")
+st.set_page_config(layout="wide", page_title="Seshat AI v16.9")
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Seshat Master Precision v16.8"
+PROJECT_NAME = "Seshat Master Precision v16.9"
 PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
@@ -29,7 +29,7 @@ with header_col2:
 
 st.divider()
 
-# --- 2. FIXED ENGINEERING LOGIC (v15.9 Core) ---
+# --- 2. FIXED ENGINEERING LOGIC ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -58,19 +58,18 @@ COUNTRY_MAP = {
 }
 
 SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'twze3'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'ta5sees'],
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'twze3', 'allot'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'ta5sees', 'assig'],
     'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'sound'],
     'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'tlfzyon'],
     'FM_KEY': ['fm', 'radio', 'راديو'],
     'GENERIC_BR_KEY': ['إذاعية', 'إذاعة', 'اذاعة', 'اذاعية', 'broadcasting']
 }
 
-# --- 3. GEOSPATIAL UTILITIES (Enhanced for NaN Handling) ---
+# --- 3. GEOSPATIAL UTILITIES ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
-        # تنظيف النص من أي رموز غريبة
         clean_str = re.sub(r'[^0-9.NSEW ]', ' ', dms_str).strip().upper()
         parts = re.findall(r"(\d+)", clean_str)
         direction = re.findall(r"([NSEW])", clean_str)
@@ -99,12 +98,12 @@ async def generate_audio(text):
 def play_audio(text):
     try:
         loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        async iose.set_event_loop(loop)
         data = loop.run_until_complete(generate_audio(text))
         if data: st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 5. ENGINE CORE ---
+# --- 5. ENGINE CORE v16.9 ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
@@ -112,7 +111,6 @@ def load_db():
     if target:
         df = pd.read_excel(target)
         df.columns = df.columns.str.strip()
-        
         mapping = {
             'Adm': ['Administration', 'Adm', 'Country'],
             'Notice Type': ['Notice Type', 'NT'],
@@ -124,7 +122,6 @@ def load_db():
                 if col in synonyms:
                     df = df.rename(columns={col: std_name})
                     break
-        
         if 'Geographic Coordinates' in df.columns:
             coords_split = df['Geographic Coordinates'].astype(str).str.split(expand=True)
             if coords_split.shape[1] >= 2:
@@ -133,7 +130,7 @@ def load_db():
         return df
     return None
 
-def engine_v16_8(q, data):
+def engine_v16_9(q, data):
     q_low = q.lower()
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(set(selected_adms))
@@ -157,20 +154,27 @@ def engine_v16_8(q, data):
     for adm in selected_adms:
         adm_df = data[data['Adm'] == adm].copy()
         if svc_codes: adm_df = adm_df[adm_df['Notice Type'].isin(svc_codes)]
-        a_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)])
-        l_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
+        
+        # تصنيف السجل هندسياً
+        adm_df['Record Type'] = adm_df['Notice Type'].apply(
+            lambda x: 'Assignment' if x in STRICT_ASSIG else ('Allotment' if x in STRICT_ALLOT else 'Unknown')
+        )
+        
+        a_count = len(adm_df[adm_df['Record Type'] == 'Assignment'])
+        l_count = len(adm_df[adm_df['Record Type'] == 'Allotment'])
         
         res = {"Adm": adm}
         if mentions_assig and not mentions_allot:
             res["Assignments"] = a_count
-            temp = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
+            temp = adm_df[adm_df['Record Type'] == 'Assignment']
         elif mentions_allot and not mentions_assig:
             res["Allotments"] = l_count
-            temp = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
+            temp = adm_df[adm_df['Record Type'] == 'Allotment']
         else:
             res["Assignments"] = a_count
             res["Allotments"] = l_count
             temp = adm_df
+            
         reports.append(res)
         final_df = pd.concat([final_df, temp], ignore_index=True)
 
@@ -186,7 +190,7 @@ if query and db is not None:
     play_audio(query)
     st.divider()
 
-    res_df, reports, msg, conf, success = engine_v16_8(query, db)
+    res_df, reports, msg, conf, success = engine_v16_9(query, db)
     
     if success and reports:
         cols = st.columns(len(reports))
@@ -198,18 +202,24 @@ if query and db is not None:
 
         st.divider()
 
-        # --- الحل الجذري للخريطة ---
+        # --- Geospatial Logic v16.9 (Colored Shapes) ---
         if PLOTLY_AVAILABLE and not res_df.empty:
-            # فلترة أي صف لا يحتوي على إحداثيات صحيحة لضمان عمل الخريطة
             map_data = res_df.dropna(subset=['lat_dec', 'lon_dec'])
-            
             if not map_data.empty:
                 st.markdown("### 🌍 Geospatial Spectrum Distribution")
-                fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", hover_name="Site/Allotment Name", 
-                                            color="Adm", zoom=3, mapbox_style="carto-positron", height=500)
+                fig_map = px.scatter_mapbox(
+                    map_data, 
+                    lat="lat_dec", lon="lon_dec", 
+                    hover_name="Site/Allotment Name", 
+                    color="Record Type",
+                    symbol="Record Type",
+                    color_discrete_map={"Assignment": "#1E3A8A", "Allotment": "#EF4444"},
+                    zoom=3, mapbox_style="carto-positron", height=600
+                )
+                fig_map.update_traces(marker={'size': 12}) # تكبير النقاط للوضوح
                 st.plotly_chart(fig_map, use_container_width=True)
             else:
-                st.warning("⚠️ No valid coordinates found for the requested results.")
+                st.warning("⚠️ No valid coordinates for mapping.")
 
         m1, m2 = st.columns([1, 2])
         chart_df = pd.DataFrame(reports).set_index('Adm')
@@ -217,7 +227,7 @@ if query and db is not None:
             st.metric("Confidence", f"{conf}%")
             if PLOTLY_AVAILABLE and "Assignments" in chart_df.columns:
                 fig = px.pie(values=[reports[0].get('Assignments', 0), reports[0].get('Allotments', 0)], 
-                             names=['Assignments', 'Allotments'], hole=.4, color_discrete_sequence=['#1E3A8A', '#94A3B8'])
+                             names=['Assignments', 'Allotments'], hole=.4, color_discrete_sequence=['#1E3A8A', '#EF4444'])
                 st.plotly_chart(fig, use_container_width=True)
         with m2: st.bar_chart(chart_df)
         
