@@ -1,6 +1,6 @@
 streamlit
 pandas
 openpyxl
-rapidfuzz
 edge-tts
-asyncio
+rapidfuzz
+plotly
