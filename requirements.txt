@@ -4,3 +4,4 @@ openpyxl
 edge-tts
 rapidfuzz
 plotly
+requests
