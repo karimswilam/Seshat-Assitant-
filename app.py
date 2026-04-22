@@ -7,27 +7,23 @@ import asyncio
 import edge_tts
 from rapidfuzz import process, fuzz
 
-# --- SAFE IMPORT FOR PLOTLY ---
 try:
     import plotly.express as px
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# --- 1. CONFIG & UI STYLING ---
-st.set_page_config(layout="wide", page_title="Seshat Spectrum AI v15.2", page_icon="📡")
+# --- 1. CONFIG & UI ---
+st.set_page_config(layout="wide", page_title="Seshat AI v15.3")
 
 st.markdown("""
     <style>
-    .country-header { text-align: center; font-weight: bold; font-size: 20px; color: #1E3A8A; margin-bottom: 5px; }
-    .country-footer { text-align: center; font-weight: bold; font-size: 16px; color: #64748B; margin-top: 5px; }
-    .main-title { text-align: center; font-size: 38px; font-weight: 800; color: #1E3A8A; }
-    .sub-title { text-align: center; font-size: 18px; color: #475569; margin-bottom: 20px; }
-    .stMetric { background-color: #F8FAFC; padding: 15px; border-radius: 10px; border: 1px solid #E2E8F0; }
+    .country-header { text-align: center; font-weight: bold; font-size: 18px; color: #1E3A8A; }
+    .country-footer { text-align: center; font-weight: bold; font-size: 15px; color: #64748B; }
+    .main-title { text-align: center; font-size: 32px; font-weight: 800; color: #1E3A8A; }
     </style>
     """, unsafe_allow_html=True)
 
-# Data Mapping
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -40,31 +36,31 @@ COUNTRY_DISPLAY = {
     'TUR': {'ar': 'الجمهورية التركية', 'en': 'Turkey'},
     'CYP': {'ar': 'جمهورية قبرص', 'en': 'Cyprus'},
     'GRC': {'ar': 'الجمهورية اليونانية', 'en': 'Greece'},
-    'ISR': {'ar': 'دولة إسرائيل', 'en': 'Israel'}
+    'ISR': {'ar': 'إسرائيل', 'en': 'Israel'}
 }
 
-# Engineering Constants
+# التنصيفات الهندسية الصارمة
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
 
 COUNTRY_MAP = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية', 'القاهرة'],
-    'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة', 'الرياض'],
-    'TUR': ['turkey', 'tur', 'تركيا', 'أنقرة'],
-    'CYP': ['cyprus', 'cyp', 'قبرص', 'نيقوسيا'],
-    'GRC': ['greece', 'grc', 'اليونان', 'أثينا'],
-    'ISR': ['israel', 'isr', 'اسرائيل', 'تل أبيب']
+    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
+    'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة'],
+    'TUR': ['turkey', 'tur', 'تركيا'],
+    'CYP': ['cyprus', 'cyp', 'قبرص'],
+    'GRC': ['greece', 'grc', 'اليونان'],
+    'ISR': ['israel', 'isr', 'اسرائيل']
 }
 
 SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'DAB_KEY': ['dab', 'داب', 'digital audio'],
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'twze3', 'allot'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'ta5sees', 'assign'],
+    'DAB_KEY': ['dab', 'داب'],
     'TV_KEY': ['tv', 'television', 'تلفزيون'],
     'FM_KEY': ['fm', 'radio', 'راديو']
 }
 
-# --- 2. NEURAL VOICE ENGINE ---
+# --- 2. VOICE ---
 async def generate_audio(text):
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
     voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
@@ -84,7 +80,7 @@ def play_audio(text):
         st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 3. PRECISION CORE LOGIC ---
+# --- 3. THE SURGICAL ENGINE ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
@@ -94,22 +90,18 @@ def load_db():
         return df
     return None
 
-def engine_v15_core(q, data):
+def engine_v15_3(q, data):
     q_low = q.lower()
-    selected_adms = []
-    
-    # 1. Identify ADMs
-    for code, keys in COUNTRY_MAP.items():
-        if any(k in q_low for k in keys): selected_adms.append(code)
+    selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(set(selected_adms))
     
-    if not selected_adms: return None, [], "Identification failed. Please specify a country.", 0, False
+    if not selected_adms: return None, [], "ADM not found.", 0, False
 
-    # 2. Identify Type & Service
-    w_as = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
-    w_al = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
-    if not w_as and not w_al: w_as = w_al = True
-
+    # تحديد النية بدقة: هل المستخدم ذكر كلمة تخصيص أو توزيع؟
+    mentions_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
+    mentions_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
+    
+    # فلترة الخدمة (DAB, FM, TV)
     svc_codes = []
     if any(x in q_low for x in SYNONYMS['DAB_KEY']): svc_codes = ['GS1','GS2','DS1','DS2']
     elif any(x in q_low for x in SYNONYMS['FM_KEY']): svc_codes = ['T01','T03','T04']
@@ -117,7 +109,6 @@ def engine_v15_core(q, data):
 
     reports = []; final_df = pd.DataFrame()
 
-    # 3. Process each ADM independently to prevent data pollution
     for adm in selected_adms:
         adm_df = data[data['Adm'] == adm].copy()
         if svc_codes: adm_df = adm_df[adm_df['Notice Type'].isin(svc_codes)]
@@ -125,67 +116,71 @@ def engine_v15_core(q, data):
         a_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
         
-        reports.append({"Adm": adm, "Assignments": a_count, "Allotments": l_count})
-        
-        if w_as and not w_al: temp = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
-        elif w_al and not w_as: temp = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
-        else: temp = adm_df
+        # بناء التقرير بناءً على الفلتر الصارم
+        res = {"Adm": adm}
+        if mentions_assig and not mentions_allot:
+            res["Assignments"] = a_count
+            temp = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
+        elif mentions_allot and not mentions_assig:
+            res["Allotments"] = l_count
+            temp = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
+        else: # في حالة سأل عن الاتنين أو مسألش عن حاجة محددة
+            res["Assignments"] = a_count
+            res["Allotments"] = l_count
+            temp = adm_df
+            
+        reports.append(res)
         final_df = pd.concat([final_df, temp], ignore_index=True)
 
-    msg = " | ".join([f"{r['Adm']}: {r['Assignments'] if w_as else ''} Assig, {r['Allotments'] if w_al else ''} Allot" for r in reports])
-    return final_df, reports, msg, 100, True
+    msg_parts = []
+    for r in reports:
+        txt = f"{r['Adm']}: "
+        if "Assignments" in r: txt += f"{r['Assignments']} Assignments "
+        if "Allotments" in r: txt += f"{r['Allotments']} Allotments"
+        msg_parts.append(txt)
+    
+    return final_df, reports, " | ".join(msg_parts), 100, True
 
-# --- 4. MAIN INTERFACE ---
+# --- 4. UI ---
 db = load_db()
-
-st.markdown('<div class="main-title">📡 Seshat Master Intelligence</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">v15.2 | Regulatory Spectrum & Coordination Dashboard</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">📡 Seshat Master Precision v15.3</div>', unsafe_allow_html=True)
 st.divider()
 
-query = st.text_input("🎙️ Input Regulatory Inquiry:", placeholder="e.g. Compare DAB assignments between Egypt and Israel", key="main_q")
+query = st.text_input("🎙️ Input Question:", placeholder="e.g. Compare DAB assignments in Egypt and Israel", key="main_q")
 
 if query and db is not None:
-    # Voice Input Replay
-    play_audio(query)
-
-    res_df, reports, msg, conf, success = engine_v15_core(query, db)
+    res_df, reports, msg, conf, success = engine_v15_3(query, db)
     
     if success and reports:
-        # Centered Large Flags
-        f_cols = st.columns(len(reports))
+        # 1. Flags (Reduced Size & Centered)
+        cols = st.columns(len(reports))
         for i, r in enumerate(reports):
-            with f_cols[i]:
+            with cols[i]:
                 st.markdown(f'<p class="country-header">{COUNTRY_DISPLAY[r["Adm"]]["ar"]}</p>', unsafe_allow_html=True)
-                st.image(FLAGS.get(r['Adm']), use_container_width=True)
+                st.image(FLAGS.get(r['Adm']), width=300) # تم تصغير الحجم لـ 300
                 st.markdown(f'<p class="country-footer">{COUNTRY_DISPLAY[r["Adm"]]["en"]}</p>', unsafe_allow_html=True)
 
         st.divider()
         
-        # Metrics & Charts
+        # 2. Results & Charts
         m1, m2 = st.columns([1, 2])
+        chart_df = pd.DataFrame(reports).set_index('Adm')
+        
         with m1:
-            st.metric("Confidence Score", f"{conf}%")
-            if PLOTLY_AVAILABLE and len(reports) > 0:
-                fig = px.pie(values=[reports[0]['Assignments'], reports[0]['Allotments']], 
-                             names=['Assignments', 'Allotments'], hole=.45,
-                             color_discrete_sequence=['#1E3A8A', '#94A3B8'])
-                fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+            st.metric("Confidence", f"{conf}%")
+            if PLOTLY_AVAILABLE and "Assignments" in chart_df.columns and "Allotments" in chart_df.columns:
+                fig = px.pie(values=[reports[0].get('Assignments', 0), reports[0].get('Allotments', 0)], 
+                             names=['Assignments', 'Allotments'], hole=.4)
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Donut chart visualization active.")
-
+        
         with m2:
-            chart_df = pd.DataFrame(reports).set_index('Adm')
-            st.bar_chart(chart_df[["Assignments", "Allotments"]])
+            st.bar_chart(chart_df)
 
         st.table(chart_df)
         
-        # Neural Voice Output
+        # 3. Voice
         st.success(msg)
         play_audio(msg)
 
-        with st.expander("📝 View Detailed Spectrum Records"):
-            st.dataframe(res_df, use_container_width=True)
-
-elif db is None:
-    st.error("Data file not found. Please upload Data.xlsx to the repository.")
+        with st.expander("Technical Records"):
+            st.dataframe(res_df)
