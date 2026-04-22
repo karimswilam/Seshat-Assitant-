@@ -15,13 +15,12 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v16.7")
+st.set_page_config(layout="wide", page_title="Seshat AI v16.8")
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Seshat Master Precision v16.7"
+PROJECT_NAME = "Seshat Master Precision v16.8"
 PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
 
-# تصميم الهيدر (v15.9 Style)
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
 with header_col2:
     if os.path.exists(LOGO_FILE):
@@ -67,15 +66,17 @@ SYNONYMS = {
     'GENERIC_BR_KEY': ['إذاعية', 'إذاعة', 'اذاعة', 'اذاعية', 'broadcasting']
 }
 
-# --- 3. GEOSPATIAL UTILITIES (New Addition) ---
+# --- 3. GEOSPATIAL UTILITIES (Enhanced for NaN Handling) ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
-        parts = re.findall(r"(\d+)", dms_str)
-        direction = re.findall(r"([NSEW])", dms_str)
+        # تنظيف النص من أي رموز غريبة
+        clean_str = re.sub(r'[^0-9.NSEW ]', ' ', dms_str).strip().upper()
+        parts = re.findall(r"(\d+)", clean_str)
+        direction = re.findall(r"([NSEW])", clean_str)
         if len(parts) >= 3 and direction:
             deg, mn, sec = map(float, parts[:3])
-            decimal = deg + (mn / 60) + (sec / 3600)
+            decimal = deg + (mn / 60.0) + (sec / 3600.0)
             if direction[0] in ['S', 'W']: decimal *= -1
             return decimal
     except: return None
@@ -103,7 +104,7 @@ def play_audio(text):
         if data: st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 5. ENGINE CORE (With Smart Mapping) ---
+# --- 5. ENGINE CORE ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
@@ -112,7 +113,6 @@ def load_db():
         df = pd.read_excel(target)
         df.columns = df.columns.str.strip()
         
-        # Smart Header Mapping (Old & New Headers)
         mapping = {
             'Adm': ['Administration', 'Adm', 'Country'],
             'Notice Type': ['Notice Type', 'NT'],
@@ -125,16 +125,15 @@ def load_db():
                     df = df.rename(columns={col: std_name})
                     break
         
-        # Coordinate Conversion for Map
         if 'Geographic Coordinates' in df.columns:
-            coords = df['Geographic Coordinates'].str.split(expand=True)
-            if coords.shape[1] >= 2:
-                df['lon_dec'] = coords[0].apply(dms_to_decimal)
-                df['lat_dec'] = coords[1].apply(dms_to_decimal)
+            coords_split = df['Geographic Coordinates'].astype(str).str.split(expand=True)
+            if coords_split.shape[1] >= 2:
+                df['lon_dec'] = coords_split[0].apply(dms_to_decimal)
+                df['lat_dec'] = coords_split[1].apply(dms_to_decimal)
         return df
     return None
 
-def engine_v16_7(q, data):
+def engine_v16_8(q, data):
     q_low = q.lower()
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(set(selected_adms))
@@ -187,10 +186,9 @@ if query and db is not None:
     play_audio(query)
     st.divider()
 
-    res_df, reports, msg, conf, success = engine_v16_7(query, db)
+    res_df, reports, msg, conf, success = engine_v16_8(query, db)
     
     if success and reports:
-        # Flags Section
         cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with cols[i]:
@@ -200,14 +198,19 @@ if query and db is not None:
 
         st.divider()
 
-        # Geospatial Map Section
-        if PLOTLY_AVAILABLE and not res_df.empty and 'lat_dec' in res_df.columns:
-            st.markdown("### 🌍 Geospatial Spectrum Distribution")
-            fig_map = px.scatter_mapbox(res_df, lat="lat_dec", lon="lon_dec", hover_name="Site/Allotment Name", 
-                                        color="Adm", zoom=3, mapbox_style="carto-positron", height=500)
-            st.plotly_chart(fig_map, use_container_width=True)
+        # --- الحل الجذري للخريطة ---
+        if PLOTLY_AVAILABLE and not res_df.empty:
+            # فلترة أي صف لا يحتوي على إحداثيات صحيحة لضمان عمل الخريطة
+            map_data = res_df.dropna(subset=['lat_dec', 'lon_dec'])
+            
+            if not map_data.empty:
+                st.markdown("### 🌍 Geospatial Spectrum Distribution")
+                fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", hover_name="Site/Allotment Name", 
+                                            color="Adm", zoom=3, mapbox_style="carto-positron", height=500)
+                st.plotly_chart(fig_map, use_container_width=True)
+            else:
+                st.warning("⚠️ No valid coordinates found for the requested results.")
 
-        # Dashboard Section
         m1, m2 = st.columns([1, 2])
         chart_df = pd.DataFrame(reports).set_index('Adm')
         with m1:
