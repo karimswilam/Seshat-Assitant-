@@ -8,10 +8,9 @@ import edge_tts
 from rapidfuzz import process, fuzz
 import plotly.express as px
 
-# --- 1. CONFIG & UI STYLE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v15.0 | Spectrum Intelligence", page_icon="📡")
+# --- 1. CONFIG & UI STYLE (Fixed & Stable) ---
+st.set_page_config(layout="wide", page_title="Seshat AI v15.1 | Precision Spectrum", page_icon="📡")
 
-# Custom CSS لتحسين شكل الواجهة والأعلام
 st.markdown("""
     <style>
     .country-header { text-align: center; font-weight: bold; font-size: 18px; margin-bottom: 5px; color: #1E3A8A; }
@@ -36,31 +35,32 @@ COUNTRY_DISPLAY = {
     'ISR': {'ar': 'إسرائيل', 'en': 'Israel'}
 }
 
+# ثوابت لا يمكن المساس بها
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
 
 COUNTRY_MAP = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية', 'جمهورية مصر'],
+    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
     'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة'],
-    'TUR': ['turkey', 'tur', 'تركيا', 'التركية'],
-    'CYP': ['cyprus', 'cyp', 'قبرص', 'القبرصية'],
-    'GRC': ['greece', 'grc', 'اليونان', 'اليونانية'],
+    'TUR': ['turkey', 'tur', 'تركيا'],
+    'CYP': ['cyprus', 'cyp', 'قبرص'],
+    'GRC': ['greece', 'grc', 'اليونان'],
     'ISR': ['israel', 'isr', 'اسرائيل']
 }
 
 SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'DAB_KEY': ['dab', 'داب', 'digital audio'],
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'allot'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'assign'],
+    'DAB_KEY': ['dab', 'داب'],
     'TV_KEY': ['tv', 'television', 'تلفزيون'],
     'FM_KEY': ['fm', 'radio', 'راديو']
 }
 
-# --- 2. VOICE ENGINE ---
+# --- 2. THE VOICE ENGINE ---
 async def generate_audio(text):
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
     voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
-    clean_text = text.replace("|", " . ").replace(":", " , ")
+    clean_text = re.sub(r'<[^>]*>', '', text).replace("|", " . ").replace(":", " , ")
     communicate = edge_tts.Communicate(clean_text, voice, rate="-10%")
     audio_data = io.BytesIO()
     async for chunk in communicate.stream():
@@ -70,11 +70,13 @@ async def generate_audio(text):
 
 def play_audio(text):
     try:
-        data = asyncio.run(generate_audio(text))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        data = loop.run_until_complete(generate_audio(text))
         st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 3. LOGIC ENGINE (v15.0 Protected) ---
+# --- 3. PRECISION ENGINE v15.1 ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
@@ -84,96 +86,88 @@ def load_db():
         return df
     return None
 
-def advanced_engine_v15(q, data):
+def engine_v15_1(q, data):
     q_low = q.lower()
+    
+    # Reset Per-Query Logic
     selected_adms = []
-    words = re.findall(r'\w+', q_low)
-    for word in words:
-        if len(word) == 3 and word.upper() in FLAGS: selected_adms.append(word.upper())
-    for code, keywords in COUNTRY_MAP.items():
-        if any(k in q_low for k in keywords): selected_adms.append(code)
+    for code, keys in COUNTRY_MAP.items():
+        if any(k in q_low for k in keys): selected_adms.append(code)
     selected_adms = list(set(selected_adms))
-    if not selected_adms: return None, [], "No country identified.", 0, False
+    
+    if not selected_adms: return None, [], "ADM identification failed.", 0, False
 
-    wants_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
-    wants_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
-    if not wants_assig and not wants_allot: wants_assig = wants_allot = True
+    # Intent & Service Filter
+    w_as = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
+    w_al = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
+    if not w_as and not w_al: w_as = w_al = True
 
-    service_filter = []
-    if any(x in q_low for x in SYNONYMS['DAB_KEY']): service_filter = ['GS1','GS2','DS1','DS2']
-    elif any(x in q_low for x in SYNONYMS['FM_KEY']): service_filter = ['T01','T03','T04']
-    elif any(x in q_low for x in SYNONYMS['TV_KEY']): service_filter = ['T02','G02','GT1','GT2','DT1','DT2']
+    svc_codes = []
+    if any(x in q_low for x in SYNONYMS['DAB_KEY']): svc_codes = ['GS1','GS2','DS1','DS2']
+    elif any(x in q_low for x in SYNONYMS['FM_KEY']): svc_codes = ['T01','T03','T04']
+    elif any(x in q_low for x in SYNONYMS['TV_KEY']): svc_codes = ['T02','G02','GT1','GT2','DT1','DT2']
 
     reports = []; final_df = pd.DataFrame()
+
     for adm in selected_adms:
         adm_df = data[data['Adm'] == adm].copy()
-        if service_filter: adm_df = adm_df[adm_df['Notice Type'].isin(service_filter)]
-        a_df = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
-        l_df = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
-        reports.append({"Adm": adm, "Assignments": len(a_df), "Allotments": len(l_df)})
-        if wants_assig and not wants_allot: final_df = pd.concat([final_df, a_df])
-        elif wants_allot and not wants_assig: final_df = pd.concat([final_df, l_df])
-        else: final_df = pd.concat([final_df, adm_df])
+        if svc_codes: adm_df = adm_df[adm_df['Notice Type'].isin(svc_codes)]
+        
+        a_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)])
+        l_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
+        
+        # Only add to report if there is actual data
+        reports.append({"Adm": adm, "Assignments": a_count, "Allotments": l_count})
+        
+        # Build Filtered DataFrame for the Expander
+        if w_as and not w_al: temp_df = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
+        elif w_al and not w_as: temp_df = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
+        else: temp_df = adm_df
+        final_df = pd.concat([final_df, temp_df], ignore_index=True)
 
-    msg_list = [f"{r['Adm']}: {r['Assignments'] if wants_assig else ''} Assignments, {r['Allotments'] if wants_allot else ''} Allotments" for r in reports]
-    return final_df, reports, " | ".join(msg_list), 100, True
+    msg = " | ".join([f"{r['Adm']}: {r['Assignments'] if w_as else ''} Assig, {r['Allotments'] if w_al else ''} Allot" for r in reports])
+    return final_df, reports, msg, 100, True
 
-# --- 4. UI CONSTRUCTION ---
+# --- 4. UI ---
 db = load_db()
+st.markdown('<div class="main-title">📡 Seshat Spectrum Precision v15.1</div>', unsafe_allow_html=True)
 
-# Custom Header
-st.markdown('<div class="main-title">📡 Seshat Spectrum Intelligence</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Advanced ITU Regulatory Analysis Dashboard v15.0</div>', unsafe_allow_html=True)
-st.divider()
+query = st.text_input("🎙️ Enter Query:", placeholder="e.g. Compare Egypt and Saudi DAB", key="main_q")
 
-# Question Area
-with st.container():
-    query = st.text_input("🎙️ Speak or Type your Spectrum Inquiry:", placeholder="e.g. Compare DAB between Egypt and Turkey", key="main_q")
-
-if query:
-    st.markdown("### 🔈 Question Audio")
+if query and db is not None:
+    # 1. Voice In
     play_audio(query)
 
-    if db is not None:
-        res_df, reports, msg, conf, success = advanced_engine_v15(query, db)
+    res_df, reports, msg, conf, success = engine_v15_1(query, db)
+    
+    if success and reports:
+        # Flags Section
+        f_cols = st.columns(len(reports))
+        for i, r in enumerate(reports):
+            with f_cols[i]:
+                st.markdown(f'<p class="country-header">{COUNTRY_DISPLAY[r["Adm"]]["ar"]}</p>', unsafe_allow_html=True)
+                st.image(FLAGS.get(r['Adm']), use_container_width=True)
+                st.markdown(f'<p class="country-footer">{COUNTRY_DISPLAY[r["Adm"]]["en"]}</p>', unsafe_allow_html=True)
+
+        st.divider()
+        # Charts Section
+        m1, m2 = st.columns([1, 2])
+        with m1:
+            st.metric("Confidence Score", f"{conf}%")
+            if len(reports) > 0:
+                fig_pie = px.pie(values=[reports[0]['Assignments'], reports[0]['Allotments']], 
+                               names=['Assignments', 'Allotments'], hole=.4, 
+                               color_discrete_sequence=['#1E3A8A', '#94A3B8'])
+                st.plotly_chart(fig_pie, use_container_width=True)
+        with m2:
+            chart_df = pd.DataFrame(reports).set_index('Adm')
+            st.bar_chart(chart_df[["Assignments", "Allotments"]])
+
+        st.table(chart_df)
         
-        if success and reports:
-            # Section: Comparative Flags (Centered & Large)
-            st.divider()
-            f_cols = st.columns(len(reports))
-            for i, r in enumerate(reports):
-                with f_cols[i]:
-                    st.markdown(f'<p class="country-header">{COUNTRY_DISPLAY[r["Adm"]]["ar"]}</p>', unsafe_allow_html=True)
-                    st.image(FLAGS.get(r['Adm']), use_container_width=True)
-                    st.markdown(f'<p class="country-footer">{COUNTRY_DISPLAY[r["Adm"]]["en"]}</p>', unsafe_allow_html=True)
+        # 2. Voice Out
+        st.success(msg)
+        play_audio(msg)
 
-            # Section: Metrics & Charts
-            st.divider()
-            m1, m2 = st.columns([1, 3])
-            with m1:
-                st.metric("Confidence Score", f"{conf}%")
-                # Donut Chart for the first country in query
-                if len(reports) > 0:
-                    fig_pie = px.pie(values=[reports[0]['Assignments'], reports[0]['Allotments']], 
-                                   names=['Assignments', 'Allotments'], hole=.4,
-                                   title=f"Ratio for {reports[0]['Adm']}",
-                                   color_discrete_sequence=px.colors.qualitative.Pastel)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-
-            with m2:
-                chart_df = pd.DataFrame(reports).set_index('Adm')
-                st.bar_chart(chart_df[["Assignments", "Allotments"]])
-
-            # Table Output
-            st.table(chart_df)
-
-            # Section: Voice Response
-            st.markdown("### 🔊 Neural Assistant Response")
-            st.success(msg)
-            play_audio(msg)
-
-            with st.expander("📝 Detailed Regulatory Records"):
-                st.dataframe(res_df, use_container_width=True)
-
-else:
-    st.info("Waiting for your regulatory query... Try asking about Comparisons or Specific Services.")
+        with st.expander("Technical Log"):
+            st.dataframe(res_df)
