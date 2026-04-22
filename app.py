@@ -14,7 +14,7 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & UI ---
-st.set_page_config(layout="wide", page_title="Seshat AI v15.5 | Precision Logic")
+st.set_page_config(layout="wide", page_title="Seshat AI v15.6 | Precision Shield")
 
 st.markdown("""
     <style>
@@ -39,6 +39,7 @@ COUNTRY_DISPLAY = {
     'ISR': {'ar': 'إسرائيل', 'en': 'Israel'}
 }
 
+# الأكواد الهندسية الثابتة
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
 
@@ -51,14 +52,13 @@ COUNTRY_MAP = {
     'ISR': ['israel', 'isr', 'اسرائيل']
 }
 
-# --- التحديث الجوهري في القاموس الهندسي ---
 SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'twze3', 'allot'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'ta5sees', 'assign'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'sound', 'audio'], # تم إضافة صوتية هنا
-    'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية'], # تم إضافة تلفزيونية هنا
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'twze3'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'ta5sees'],
+    'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'sound'],
+    'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'tlfzyon'],
     'FM_KEY': ['fm', 'radio', 'راديو'],
-    'GENERIC_BR_KEY': ['إذاعة', 'اذاعة', 'إذاعي', 'اذاعي', 'broadcasting'] # مفتاح جديد للإذاعة العامة
+    'GENERIC_BR_KEY': ['إذاعية', 'إذاعة', 'اذاعة', 'اذاعية', 'broadcasting']
 }
 
 # --- 2. VOICE ENGINE ---
@@ -81,7 +81,7 @@ def play_audio(text):
         st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 3. PRECISION ENGINE ---
+# --- 3. PRECISION ENGINE v15.6 ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
@@ -91,30 +91,27 @@ def load_db():
         return df
     return None
 
-def engine_v15_5(q, data):
+def engine_v15_6(q, data):
     q_low = q.lower()
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(set(selected_adms))
-    if not selected_adms: return None, [], "ADM identification failed.", 0, False
+    if not selected_adms: return None, [], "ADM Error", 0, False
 
     mentions_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
     mentions_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
     
-    # تحديد أكواد الخدمة بناءً على المنطق الجديد
+    # --- الـ Logic الجديد والفلترة الصارمة ---
     svc_codes = []
     is_dab = any(x in q_low for x in SYNONYMS['DAB_KEY'])
     is_tv = any(x in q_low for x in SYNONYMS['TV_KEY'])
     is_fm = any(x in q_low for x in SYNONYMS['FM_KEY'])
-    is_generic_br = any(x in q_low for x in SYNONYMS['GENERIC_BR_KEY'])
+    is_generic = any(x in q_low for x in SYNONYMS['GENERIC_BR_KEY'])
 
-    if is_generic_br: # إذاعة (تجمع DAB و TV)
-        svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2']
-    elif is_dab: # صوتية فقط
-        svc_codes = ['GS1','GS2','DS1','DS2']
-    elif is_tv: # تلفزيونية فقط
-        svc_codes = ['T02','G02','GT1','GT2','DT1','DT2']
-    elif is_fm: # FM
-        svc_codes = ['T01','T03','T04']
+    # أولوية الفلترة: لو حدد نوع، نلغي العام
+    if is_dab: svc_codes = ['GS1','GS2','DS1','DS2']
+    elif is_tv: svc_codes = ['T02','G02','GT1','GT2','DT1','DT2']
+    elif is_fm: svc_codes = ['T01','T03','T04']
+    elif is_generic: svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2']
 
     reports = []; final_df = pd.DataFrame()
     for adm in selected_adms:
@@ -127,35 +124,34 @@ def engine_v15_5(q, data):
         res = {"Adm": adm}
         if mentions_assig and not mentions_allot:
             res["Assignments"] = a_count
-            temp_df = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
+            temp = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
         elif mentions_allot and not mentions_assig:
             res["Allotments"] = l_count
-            temp_df = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
+            temp = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
         else:
             res["Assignments"] = a_count
             res["Allotments"] = l_count
-            temp_df = adm_df
+            temp = adm_df
             
         reports.append(res)
-        final_df = pd.concat([final_df, temp_df], ignore_index=True)
+        final_df = pd.concat([final_df, temp], ignore_index=True)
 
     msg = " | ".join([f"{r['Adm']}: " + (f"{r['Assignments']} Assig " if "Assignments" in r else "") + (f"{r['Allotments']} Allot" if "Allotments" in r else "") for r in reports])
     return final_df, reports, msg, 100, True
 
 # --- 4. UI ---
 db = load_db()
-st.markdown('<div class="main-title">📡 Seshat Master Precision v15.5</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">📡 Seshat Master Precision v15.6</div>', unsafe_allow_html=True)
 st.divider()
 
 query = st.text_input("🎙️ Enter Query:", key="main_q")
 
 if query and db is not None:
-    # سماع السؤال أولاً (تراكم المزايا)
     st.markdown("### 🔈 Question Replay")
     play_audio(query)
     st.divider()
 
-    res_df, reports, msg, conf, success = engine_v15_5(query, db)
+    res_df, reports, msg, conf, success = engine_v15_6(query, db)
     
     if success and reports:
         cols = st.columns(len(reports))
@@ -169,7 +165,7 @@ if query and db is not None:
         m1, m2 = st.columns([1, 2])
         chart_df = pd.DataFrame(reports).set_index('Adm')
         with m1:
-            st.metric("Confidence Score", f"{conf}%")
+            st.metric("Confidence", f"{conf}%")
             if PLOTLY_AVAILABLE and "Assignments" in chart_df.columns and "Allotments" in chart_df.columns:
                 fig = px.pie(values=[reports[0].get('Assignments', 0), reports[0].get('Allotments', 0)], 
                              names=['Assignments', 'Allotments'], hole=.4, color_discrete_sequence=['#1E3A8A', '#94A3B8'])
