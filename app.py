@@ -5,6 +5,7 @@ import io
 import re
 import asyncio
 import edge_tts
+import base64
 from rapidfuzz import process, fuzz
 
 try:
@@ -14,30 +15,22 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v15.9")
+st.set_page_config(layout="wide", page_title="Seshat AI v16.7")
 
-# --- مـكـان الـلـوجـو (تعديل سهل مستقبلاً) ---
-LOGO_FILE = "Designer.png"  # غير الاسم هنا لو غيرت صورة اللوجو قدام
-PROJECT_NAME = "Seshat Master Precision v15.9"
+LOGO_FILE = "Designer.png" 
+PROJECT_NAME = "Seshat Master Precision v16.7"
 PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
 
-# تصميم الهيدر الجديد (Clean & Direct)
+# تصميم الهيدر (v15.9 Style)
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
-
 with header_col2:
     if os.path.exists(LOGO_FILE):
-        st.image(LOGO_FILE, width=150) # استدعاء مباشر للملف
-    
-    st.markdown(f"""
-        <div style="text-align: center;">
-            <h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1>
-            <p style="color: #475569; font-size: 18px;">{PROJECT_SLOGAN}</p>
-        </div>
-    """, unsafe_allow_html=True)
+        st.image(LOGO_FILE, width=150)
+    st.markdown(f'<div style="text-align: center;"><h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1><p style="color: #475569; font-size: 18px;">{PROJECT_SLOGAN}</p></div>', unsafe_allow_html=True)
 
 st.divider()
 
-# --- 2. FIXED ENGINEERING LOGIC (الـقـاعدة الأسـاسـيـة) ---
+# --- 2. FIXED ENGINEERING LOGIC (v15.9 Core) ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -74,7 +67,21 @@ SYNONYMS = {
     'GENERIC_BR_KEY': ['إذاعية', 'إذاعة', 'اذاعة', 'اذاعية', 'broadcasting']
 }
 
-# --- 3. VOICE ENGINE ---
+# --- 3. GEOSPATIAL UTILITIES (New Addition) ---
+def dms_to_decimal(dms_str):
+    try:
+        if pd.isna(dms_str) or not isinstance(dms_str, str): return None
+        parts = re.findall(r"(\d+)", dms_str)
+        direction = re.findall(r"([NSEW])", dms_str)
+        if len(parts) >= 3 and direction:
+            deg, mn, sec = map(float, parts[:3])
+            decimal = deg + (mn / 60) + (sec / 3600)
+            if direction[0] in ['S', 'W']: decimal *= -1
+            return decimal
+    except: return None
+    return None
+
+# --- 4. VOICE ENGINE ---
 async def generate_audio(text):
     try:
         is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
@@ -96,17 +103,38 @@ def play_audio(text):
         if data: st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 4. ENGINE CORE ---
+# --- 5. ENGINE CORE (With Smart Mapping) ---
 @st.cache_data
 def load_db():
-    files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
+    files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
     target = "Data.xlsx" if "Data.xlsx" in files else (files[0] if files else None)
     if target:
-        df = pd.read_excel(target); df.columns = df.columns.str.strip()
+        df = pd.read_excel(target)
+        df.columns = df.columns.str.strip()
+        
+        # Smart Header Mapping (Old & New Headers)
+        mapping = {
+            'Adm': ['Administration', 'Adm', 'Country'],
+            'Notice Type': ['Notice Type', 'NT'],
+            'Site/Allotment Name': ['Site/Allotment Name', 'Site Name', 'Standard/Allotment Area'],
+            'Geographic Coordinates': ['Geographic Coordinates', 'Coordinates']
+        }
+        for std_name, synonyms in mapping.items():
+            for col in df.columns:
+                if col in synonyms:
+                    df = df.rename(columns={col: std_name})
+                    break
+        
+        # Coordinate Conversion for Map
+        if 'Geographic Coordinates' in df.columns:
+            coords = df['Geographic Coordinates'].str.split(expand=True)
+            if coords.shape[1] >= 2:
+                df['lon_dec'] = coords[0].apply(dms_to_decimal)
+                df['lat_dec'] = coords[1].apply(dms_to_decimal)
         return df
     return None
 
-def engine_v15_9(q, data):
+def engine_v16_7(q, data):
     q_low = q.lower()
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(set(selected_adms))
@@ -150,7 +178,7 @@ def engine_v15_9(q, data):
     msg = " | ".join([f"{r['Adm']}: " + (f"{r['Assignments']} Assig " if "Assignments" in r else "") + (f"{r['Allotments']} Allot" if "Allotments" in r else "") for r in reports])
     return final_df, reports, msg, 100, True
 
-# --- 5. UI FLOW ---
+# --- 6. UI FLOW ---
 db = load_db()
 query = st.text_input("🎙️ Enter Spectrum Inquiry:", key="main_q")
 
@@ -159,9 +187,10 @@ if query and db is not None:
     play_audio(query)
     st.divider()
 
-    res_df, reports, msg, conf, success = engine_v15_9(query, db)
+    res_df, reports, msg, conf, success = engine_v16_7(query, db)
     
     if success and reports:
+        # Flags Section
         cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with cols[i]:
@@ -170,15 +199,25 @@ if query and db is not None:
                 st.markdown(f'<p style="text-align:center; color:grey;">{COUNTRY_DISPLAY[r["Adm"]]["en"]}</p>', unsafe_allow_html=True)
 
         st.divider()
+
+        # Geospatial Map Section
+        if PLOTLY_AVAILABLE and not res_df.empty and 'lat_dec' in res_df.columns:
+            st.markdown("### 🌍 Geospatial Spectrum Distribution")
+            fig_map = px.scatter_mapbox(res_df, lat="lat_dec", lon="lon_dec", hover_name="Site/Allotment Name", 
+                                        color="Adm", zoom=3, mapbox_style="carto-positron", height=500)
+            st.plotly_chart(fig_map, use_container_width=True)
+
+        # Dashboard Section
         m1, m2 = st.columns([1, 2])
         chart_df = pd.DataFrame(reports).set_index('Adm')
         with m1:
             st.metric("Confidence", f"{conf}%")
-            if PLOTLY_AVAILABLE and "Assignments" in chart_df.columns and "Allotments" in chart_df.columns:
+            if PLOTLY_AVAILABLE and "Assignments" in chart_df.columns:
                 fig = px.pie(values=[reports[0].get('Assignments', 0), reports[0].get('Allotments', 0)], 
                              names=['Assignments', 'Allotments'], hole=.4, color_discrete_sequence=['#1E3A8A', '#94A3B8'])
                 st.plotly_chart(fig, use_container_width=True)
         with m2: st.bar_chart(chart_df)
+        
         st.table(chart_df)
         st.markdown("### 🔊 Assistant Response")
         st.success(msg)
