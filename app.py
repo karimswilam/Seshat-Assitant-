@@ -5,7 +5,6 @@ import io
 import re
 import asyncio
 import edge_tts
-import base64
 from rapidfuzz import process, fuzz
 
 try:
@@ -14,40 +13,31 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# --- 1. CONFIG & STYLING ---
-st.set_page_config(layout="wide", page_title="Seshat AI v15.8")
+# --- 1. CONFIG & INTERFACE ---
+st.set_page_config(layout="wide", page_title="Seshat AI v15.9")
 
-# وظيفة ذكية لجلب اللوجو حتى لو الاسم فيه اختلاف بسيط
-def get_logo_html():
-    possible_names = ["Designer.jpg", "designer.jpg", "Designer.png", "Designer.jpeg"]
-    logo_path = None
-    for name in possible_names:
-        if os.path.exists(name):
-            logo_path = name
-            break
+# --- مـكـان الـلـوجـو (تعديل سهل مستقبلاً) ---
+LOGO_FILE = "Designer.png"  # غير الاسم هنا لو غيرت صورة اللوجو قدام
+PROJECT_NAME = "Seshat Master Precision v15.9"
+PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
+
+# تصميم الهيدر الجديد (Clean & Direct)
+header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
+
+with header_col2:
+    if os.path.exists(LOGO_FILE):
+        st.image(LOGO_FILE, width=150) # استدعاء مباشر للملف
     
-    if logo_path:
-        with open(logo_path, "rb") as img_file:
-            b64 = base64.b64encode(img_file.read()).decode()
-            return f'<img src="data:image/jpeg;base64,{b64}" style="width:120px; border-radius:10px; margin-bottom:10px;">'
-    return "" # يرجع فاضي لو مفيش صورة بدل ما يبوظ الصفحة
-
-logo_code = get_logo_html()
-
-st.markdown(f"""
-    <style>
-    .header-container {{ text-align: center; padding: 20px; background-color: #f8fafc; border-radius: 15px; margin-bottom: 20px; }}
-    .main-title {{ font-size: 32px; font-weight: 800; color: #1E3A8A; margin: 5px 0; }}
-    .sub-title {{ font-size: 16px; color: #475569; }}
-    </style>
-    <div class="header-container">
-        {logo_code}
-        <div class="main-title">Seshat Master Precision v15.8</div>
-        <div class="sub-title">Project BASIRA | Spectrum Intelligence & Governance</div>
-    </div>
+    st.markdown(f"""
+        <div style="text-align: center;">
+            <h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1>
+            <p style="color: #475569; font-size: 18px;">{PROJECT_SLOGAN}</p>
+        </div>
     """, unsafe_allow_html=True)
 
-# --- 2. THE PROTECTED LOGIC (v15.6 Core) ---
+st.divider()
+
+# --- 2. FIXED ENGINEERING LOGIC (الـقـاعدة الأسـاسـيـة) ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -106,7 +96,7 @@ def play_audio(text):
         if data: st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 4. DATA ENGINE v15.6 (Logic Unchanged) ---
+# --- 4. ENGINE CORE ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
@@ -116,11 +106,11 @@ def load_db():
         return df
     return None
 
-def engine_v15_8(q, data):
+def engine_v15_9(q, data):
     q_low = q.lower()
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(set(selected_adms))
-    if not selected_adms: return None, [], "ADM Identification failed.", 0, False
+    if not selected_adms: return None, [], "ADM identification error.", 0, False
 
     mentions_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
     mentions_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
@@ -160,24 +150,24 @@ def engine_v15_8(q, data):
     msg = " | ".join([f"{r['Adm']}: " + (f"{r['Assignments']} Assig " if "Assignments" in r else "") + (f"{r['Allotments']} Allot" if "Allotments" in r else "") for r in reports])
     return final_df, reports, msg, 100, True
 
-# --- 5. RUNTIME ---
+# --- 5. UI FLOW ---
 db = load_db()
-query = st.text_input("🎙️ Enter Query:", key="main_q")
+query = st.text_input("🎙️ Enter Spectrum Inquiry:", key="main_q")
 
 if query and db is not None:
     st.markdown("### 🔈 Question Replay")
     play_audio(query)
     st.divider()
 
-    res_df, reports, msg, conf, success = engine_v15_8(query, db)
+    res_df, reports, msg, conf, success = engine_v15_9(query, db)
     
     if success and reports:
         cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with cols[i]:
-                st.markdown(f'<p class="country-header">{COUNTRY_DISPLAY[r["Adm"]]["ar"]}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="text-align:center; font-weight:bold;">{COUNTRY_DISPLAY[r["Adm"]]["ar"]}</p>', unsafe_allow_html=True)
                 st.image(FLAGS.get(r['Adm']), width=300)
-                st.markdown(f'<p class="country-footer">{COUNTRY_DISPLAY[r["Adm"]]["en"]}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="text-align:center; color:grey;">{COUNTRY_DISPLAY[r["Adm"]]["en"]}</p>', unsafe_allow_html=True)
 
         st.divider()
         m1, m2 = st.columns([1, 2])
@@ -192,4 +182,5 @@ if query and db is not None:
         st.table(chart_df)
         st.markdown("### 🔊 Assistant Response")
         st.success(msg)
-        play_audio
+        play_audio(msg)
+        with st.expander("Technical Records"): st.dataframe(res_df)
