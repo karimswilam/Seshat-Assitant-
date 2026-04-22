@@ -14,35 +14,40 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# --- 1. CONFIG & LOGO PROCESSING ---
-st.set_page_config(layout="wide", page_title="Seshat AI v15.7 | Basira Branded")
+# --- 1. CONFIG & STYLING ---
+st.set_page_config(layout="wide", page_title="Seshat AI v15.8")
 
-# وظيفة لتحويل اللوجو المرفوع لـ Base64 عشان يظهر في الهيدر بأمان
-def get_base64_image(image_path):
-    with open(image_path, "rb") as img_file:
-        return base64.b64encode(img_file.read()).decode()
+# وظيفة ذكية لجلب اللوجو حتى لو الاسم فيه اختلاف بسيط
+def get_logo_html():
+    possible_names = ["Designer.jpg", "designer.jpg", "Designer.png", "Designer.jpeg"]
+    logo_path = None
+    for name in possible_names:
+        if os.path.exists(name):
+            logo_path = name
+            break
+    
+    if logo_path:
+        with open(logo_path, "rb") as img_file:
+            b64 = base64.b64encode(img_file.read()).decode()
+            return f'<img src="data:image/jpeg;base64,{b64}" style="width:120px; border-radius:10px; margin-bottom:10px;">'
+    return "" # يرجع فاضي لو مفيش صورة بدل ما يبوظ الصفحة
 
-# التأكد من وجود ملف اللوجو (Designer.jpg)
-logo_html = ""
-if os.path.exists("Designer.jpg"):
-    logo_base64 = get_base64_image("Designer.jpg")
-    logo_html = f'<img src="data:image/jpeg;base64,{logo_base64}" style="width:120px; border-radius:10px; margin-bottom:10px;">'
+logo_code = get_logo_html()
 
 st.markdown(f"""
     <style>
-    .header-container {{ text-align: center; padding: 10px; }}
-    .country-header {{ text-align: center; font-weight: bold; font-size: 18px; color: #1E3A8A; }}
-    .country-footer {{ text-align: center; font-weight: bold; font-size: 15px; color: #64748B; }}
-    .main-title {{ text-align: center; font-size: 32px; font-weight: 800; color: #1E3A8A; margin-top: -10px; }}
+    .header-container {{ text-align: center; padding: 20px; background-color: #f8fafc; border-radius: 15px; margin-bottom: 20px; }}
+    .main-title {{ font-size: 32px; font-weight: 800; color: #1E3A8A; margin: 5px 0; }}
+    .sub-title {{ font-size: 16px; color: #475569; }}
     </style>
     <div class="header-container">
-        {logo_html}
-        <div class="main-title">Seshat Master Precision v15.7</div>
-        <p style="text-align: center; color: #475569;">Project BASIRA | Spectrum Intelligence & Governance</p>
+        {logo_code}
+        <div class="main-title">Seshat Master Precision v15.8</div>
+        <div class="sub-title">Project BASIRA | Spectrum Intelligence & Governance</div>
     </div>
     """, unsafe_allow_html=True)
 
-# --- ثوابت الـ Logic (محمية تماماً كما هي) ---
+# --- 2. THE PROTECTED LOGIC (v15.6 Core) ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -79,27 +84,29 @@ SYNONYMS = {
     'GENERIC_BR_KEY': ['إذاعية', 'إذاعة', 'اذاعة', 'اذاعية', 'broadcasting']
 }
 
-# --- 2. VOICE ENGINE ---
+# --- 3. VOICE ENGINE ---
 async def generate_audio(text):
-    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
-    voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
-    clean_text = re.sub(r'<[^>]*>', '', text).replace("|", " . ").replace(":", " , ")
-    communicate = edge_tts.Communicate(clean_text, voice, rate="-10%")
-    audio_data = io.BytesIO()
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio": audio_data.write(chunk["data"])
-    audio_data.seek(0)
-    return audio_data
+    try:
+        is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
+        voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
+        clean_text = re.sub(r'<[^>]*>', '', text).replace("|", " . ").replace(":", " , ")
+        communicate = edge_tts.Communicate(clean_text, voice, rate="-10%")
+        audio_data = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio": audio_data.write(chunk["data"])
+        audio_data.seek(0)
+        return audio_data
+    except: return None
 
 def play_audio(text):
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         data = loop.run_until_complete(generate_audio(text))
-        st.audio(data, format="audio/mp3")
+        if data: st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 3. PRECISION ENGINE v15.7 (Full Protected) ---
+# --- 4. DATA ENGINE v15.6 (Logic Unchanged) ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
@@ -109,11 +116,11 @@ def load_db():
         return df
     return None
 
-def engine_v15_7(q, data):
+def engine_v15_8(q, data):
     q_low = q.lower()
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(set(selected_adms))
-    if not selected_adms: return None, [], "ADM Error", 0, False
+    if not selected_adms: return None, [], "ADM Identification failed.", 0, False
 
     mentions_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
     mentions_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
@@ -122,18 +129,17 @@ def engine_v15_7(q, data):
     is_dab = any(x in q_low for x in SYNONYMS['DAB_KEY'])
     is_tv = any(x in q_low for x in SYNONYMS['TV_KEY'])
     is_fm = any(x in q_low for x in SYNONYMS['FM_KEY'])
-    is_generic = any(x in q_low for x in SYNONYMS['GENERIC_BR_KEY'])
+    is_gen = any(x in q_low for x in SYNONYMS['GENERIC_BR_KEY'])
 
     if is_dab: svc_codes = ['GS1','GS2','DS1','DS2']
     elif is_tv: svc_codes = ['T02','G02','GT1','GT2','DT1','DT2']
     elif is_fm: svc_codes = ['T01','T03','T04']
-    elif is_generic: svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2']
+    elif is_gen: svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2']
 
     reports = []; final_df = pd.DataFrame()
     for adm in selected_adms:
         adm_df = data[data['Adm'] == adm].copy()
         if svc_codes: adm_df = adm_df[adm_df['Notice Type'].isin(svc_codes)]
-        
         a_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
         
@@ -148,17 +154,14 @@ def engine_v15_7(q, data):
             res["Assignments"] = a_count
             res["Allotments"] = l_count
             temp = adm_df
-            
         reports.append(res)
         final_df = pd.concat([final_df, temp], ignore_index=True)
 
     msg = " | ".join([f"{r['Adm']}: " + (f"{r['Assignments']} Assig " if "Assignments" in r else "") + (f"{r['Allotments']} Allot" if "Allotments" in r else "") for r in reports])
     return final_df, reports, msg, 100, True
 
-# --- 4. UI MAIN ---
+# --- 5. RUNTIME ---
 db = load_db()
-st.divider()
-
 query = st.text_input("🎙️ Enter Query:", key="main_q")
 
 if query and db is not None:
@@ -166,7 +169,7 @@ if query and db is not None:
     play_audio(query)
     st.divider()
 
-    res_df, reports, msg, conf, success = engine_v15_7(query, db)
+    res_df, reports, msg, conf, success = engine_v15_8(query, db)
     
     if success and reports:
         cols = st.columns(len(reports))
@@ -189,5 +192,4 @@ if query and db is not None:
         st.table(chart_df)
         st.markdown("### 🔊 Assistant Response")
         st.success(msg)
-        play_audio(msg)
-        with st.expander("Technical Records"): st.dataframe(res_df)
+        play_audio
