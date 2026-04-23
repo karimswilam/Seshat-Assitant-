@@ -5,3 +5,4 @@ edge-tts
 rapidfuzz
 plotly
 requests
+streamlit-mic-recorder
