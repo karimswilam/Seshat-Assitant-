@@ -5,10 +5,9 @@ import io
 import re
 import asyncio
 import edge_tts
-import base64
 from rapidfuzz import process, fuzz
-# إضافة مكتبة تسجيل الصوت
-from streamlit_mic_recorder import mic_recorder, speech_to_text
+# المكتبة الأساسية للصوت
+from streamlit_mic_recorder import speech_to_text
 
 try:
     import plotly.express as px
@@ -17,11 +16,11 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v17.1")
+st.set_page_config(layout="wide", page_title="Seshat AI v17.2")
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Seshat Master Precision v17.1"
-PROJECT_SLOGAN = "Project BASIRA | Voice Intelligence & Spectrum Governance"
+PROJECT_NAME = "Seshat Master Precision v17.2"
+PROJECT_SLOGAN = "Project BASIRA | Real-time Voice Intelligence"
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
 with header_col2:
@@ -31,7 +30,7 @@ with header_col2:
 
 st.divider()
 
-# --- 2. FIXED ENGINEERING LOGIC (v17.0 Core) ---
+# --- 2. FIXED ENGINEERING LOGIC ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -105,7 +104,7 @@ def play_audio(text):
         if data: st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 4. ENGINE CORE v17.1 (Same Logic as v17.0) ---
+# --- 4. ENGINE CORE v17.2 ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
@@ -113,30 +112,23 @@ def load_db():
     if target:
         df = pd.read_excel(target)
         df.columns = df.columns.str.strip()
-        mapping = {
-            'Adm': ['Administration', 'Adm', 'Country'],
-            'Notice Type': ['Notice Type', 'NT'],
-            'Site/Allotment Name': ['Site/Allotment Name', 'Site Name', 'Standard/Allotment Area'],
-            'Geographic Coordinates': ['Geographic Coordinates', 'Coordinates']
-        }
-        for std_name, synonyms in mapping.items():
+        mapping = {'Adm': ['Administration', 'Adm'], 'Notice Type': ['Notice Type', 'NT'], 'Geographic Coordinates': ['Geographic Coordinates']}
+        for std, syns in mapping.items():
             for col in df.columns:
-                if col in synonyms:
-                    df = df.rename(columns={col: std_name})
-                    break
+                if col in syns: df = df.rename(columns={col: std}); break
         if 'Geographic Coordinates' in df.columns:
-            coords_split = df['Geographic Coordinates'].astype(str).str.split(expand=True)
-            if coords_split.shape[1] >= 2:
-                df['lon_dec'] = coords_split[0].apply(dms_to_decimal)
-                df['lat_dec'] = coords_split[1].apply(dms_to_decimal)
+            coords = df['Geographic Coordinates'].astype(str).str.split(expand=True)
+            if coords.shape[1] >= 2:
+                df['lon_dec'] = coords[0].apply(dms_to_decimal)
+                df['lat_dec'] = coords[1].apply(dms_to_decimal)
         return df
     return None
 
-def engine_v17_1(q, data):
+def engine_v17_2(q, data):
     q_low = q.lower()
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))
-    if not selected_adms: return None, [], "ADM identification error.", 0, False
+    if not selected_adms: return None, [], "ADM identifying error.", 0, False
 
     is_total = any(x in q_low for x in SYNONYMS['TOTAL_KEY'])
     is_except = any(x in q_low for x in SYNONYMS['EXCEPT_KEY'])
@@ -152,13 +144,11 @@ def engine_v17_1(q, data):
         parts = re.split('|'.join(SYNONYMS['EXCEPT_KEY']), q_low)
         main_svc = get_svc_from_text(parts[0])
         except_svc = get_svc_from_text(parts[1]) if len(parts) > 1 else []
-        if is_total and not main_svc:
-            main_svc = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04']
+        if is_total and not main_svc: main_svc = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04']
         svc_codes = [s for s in main_svc if s not in except_svc]
     else:
         svc_codes = get_svc_from_text(q_low)
-        if is_total and not svc_codes:
-            svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04']
+        if is_total and not svc_codes: svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04']
 
     reports = []; final_df = pd.DataFrame()
     mentions_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
@@ -168,11 +158,7 @@ def engine_v17_1(q, data):
         adm_df = data[data['Adm'] == adm].copy()
         if svc_codes: adm_df = adm_df[adm_df['Notice Type'].isin(svc_codes)]
         
-        # تصنيف للرسم (v16.9 Logic)
-        adm_df['Record Type'] = adm_df['Notice Type'].apply(
-            lambda x: 'Assignment' if x in STRICT_ASSIG else 'Allotment'
-        )
-        
+        adm_df['Record Type'] = adm_df['Notice Type'].apply(lambda x: 'Assignment' if x in STRICT_ASSIG else 'Allotment')
         a_count = len(adm_df[adm_df['Record Type'] == 'Assignment'])
         l_count = len(adm_df[adm_df['Record Type'] == 'Allotment'])
         
@@ -184,14 +170,13 @@ def engine_v17_1(q, data):
         elif mentions_allot and not mentions_assig: temp = adm_df[adm_df['Record Type'] == 'Allotment']
         final_df = pd.concat([final_df, temp], ignore_index=True)
 
-    # Comparison Logic
     if len(reports) >= 2:
         comp_key = "Assignments" if mentions_assig else ("Allotments" if mentions_allot else "Total")
         v1, v2 = reports[0][comp_key], reports[1][comp_key]
-        diff = abs(v1 - v2)
+        diff = abs(v1-v2)
         if v1 > v2: msg = f"Yes, {reports[0]['Adm']} has more {comp_key} than {reports[1]['Adm']} by {diff} records."
         elif v2 > v1: msg = f"No, {reports[1]['Adm']} actually has more {comp_key} than {reports[0]['Adm']} by {diff} records."
-        else: msg = f"Both {reports[0]['Adm']} and {reports[1]['Adm']} have the same number of {comp_key} ({v1})."
+        else: msg = f"Both have the same {comp_key} ({v1})."
     else:
         msg = " | ".join([f"{r['Adm']}: {r['Assignments']} Assig, {r['Allotments']} Allot" for r in reports])
 
@@ -200,40 +185,39 @@ def engine_v17_1(q, data):
 # --- 5. UI FLOW ---
 db = load_db()
 
-# --- الـ Voice Input الجديد ---
-st.markdown("### 🎙️ Voice & Text Command Center")
-voice_col1, voice_col2 = st.columns([1, 4])
+st.markdown("### 🎙️ Voice Command Center")
+# ميزة الـ Interpreting: النص بيظهر فوراً بمجرد ما تخلص كلام
+voice_query = speech_to_text(language='ar-EG', start_prompt="🎙️ Click to Speak", stop_prompt="⏹️ Analyzing...", key='speech')
 
-with voice_col1:
-    st.write("Push to speak:")
-    # سطر تسجيل الصوت وتحويله لنص فوراً (يدعم العربية والإنجليزية)
-    voice_query = speech_to_text(language='ar-EG', start_prompt="🟢 Start", stop_prompt="🔴 Stop", key='speech')
+# عرض النص المسموع فوراً لليوزر
+if voice_query:
+    st.chat_message("user").write(f"I heard: '{voice_query}'")
 
-with voice_col2:
-    query = st.text_input("Or type your inquiry here:", value=voice_query if voice_query else "", key="main_q")
+query = st.text_input("📝 Manual Inquiry / Edit Voice Text:", value=voice_query if voice_query else "", key="main_input")
 
+# التأكد إن فيه query قبل البدء (حل لمشكلة الـ Error)
 if query and db is not None:
-    st.markdown("### 🔈 Question Replay")
+    st.markdown("### 🔈 Processing...")
     play_audio(query)
-    st.divider()
-
-    res_df, reports, msg, conf, success = engine_v17_1(query, db)
+    
+    res_df, reports, msg, conf, success = engine_v17_2(query, db)
     
     if success and reports:
+        # الأعلام والإحصائيات
         cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with cols[i]:
                 st.markdown(f'<p style="text-align:center; font-weight:bold;">{COUNTRY_DISPLAY[r["Adm"]]["ar"]}</p>', unsafe_allow_html=True)
-                st.image(FLAGS.get(r['Adm']), width=300)
-                st.metric(f"{r['Adm']}", f"Total: {r['Total']}", f"Assig: {r['Assignments']} | Allot: {r['Allotments']}")
+                st.image(FLAGS.get(r['Adm']), width=250)
+                st.metric(r['Adm'], f"Total: {r['Total']}", f"A: {r['Assignments']} | L: {r['Allotments']}")
 
         st.divider()
 
-        # Geospatial Map (Multi-Color & Shape)
+        # الخريطة الاحترافية (أزرق وأحمر)
         if PLOTLY_AVAILABLE and not res_df.empty:
             map_data = res_df.dropna(subset=['lat_dec', 'lon_dec'])
             if not map_data.empty:
-                st.markdown("### 🌍 Geospatial Spectrum Distribution")
+                st.markdown("### 🌍 Geospatial Analysis")
                 fig_map = px.scatter_mapbox(
                     map_data, lat="lat_dec", lon="lon_dec", hover_name="Site/Allotment Name", 
                     color="Record Type", symbol="Record Type",
@@ -242,7 +226,7 @@ if query and db is not None:
                 )
                 st.plotly_chart(fig_map, use_container_width=True)
 
-        # Analytics
+        # الرسوم البيانية
         m1, m2 = st.columns([1, 2])
         chart_df = pd.DataFrame(reports).set_index('Adm')
         with m1:
@@ -250,11 +234,9 @@ if query and db is not None:
             if PLOTLY_AVAILABLE:
                 fig = px.bar(chart_df, y=["Assignments", "Allotments"], barmode="group", color_discrete_sequence=['#1E3A8A', '#EF4444'])
                 st.plotly_chart(fig, use_container_width=True)
-        with m2: 
-            st.bar_chart(chart_df[['Total']])
+        with m2: st.bar_chart(chart_df[['Total']])
         
         st.table(chart_df)
-        st.markdown("### 🔊 Assistant Response")
         st.success(msg)
         play_audio(msg)
-        with st.expander("Technical Records"): st.dataframe(res_df)
+        with st.expander("Show Data Records"): st.dataframe(res_df)
