@@ -7,7 +7,6 @@ import asyncio
 import edge_tts
 import base64
 from rapidfuzz import process, fuzz
-# المكتبة الجديدة للتحكم في المايك وإعطاء مؤشر بصري
 from streamlit_mic_recorder import speech_to_text
 
 try:
@@ -18,6 +17,27 @@ except ImportError:
 
 # --- 1. CONFIG & INTERFACE (Preserved v17.0) ---
 st.set_page_config(layout="wide", page_title="Seshat AI v17.4")
+
+# CSS لإضافة مؤشر نبضي (Pulse) يظهر عند التسجيل
+st.markdown("""
+    <style>
+    @keyframes pulse {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7); }
+        70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(255, 82, 82, 0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); }
+    }
+    .recording-active {
+        background: #ff5252;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        display: inline-block;
+        animation: pulse 1s infinite;
+        vertical-align: middle;
+        margin-right: 10px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 LOGO_FILE = "Designer.png" 
 PROJECT_NAME = "Seshat Master Precision v17.4"
@@ -31,7 +51,7 @@ with header_col2:
 
 st.divider()
 
-# --- 2. FIXED ENGINEERING LOGIC (Preserved v17.0) ---
+# --- 2. FIXED ENGINEERING LOGIC (Strict v17.0) ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -69,7 +89,6 @@ SYNONYMS = {
     'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'من غير', 'without']
 }
 
-# --- 3. GEOSPATIAL UTILITIES ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
@@ -84,7 +103,6 @@ def dms_to_decimal(dms_str):
     except: return None
     return None
 
-# --- 4. VOICE ENGINE ---
 async def generate_audio(text):
     try:
         is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
@@ -108,7 +126,6 @@ def play_audio(text):
             st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 5. ENGINE CORE (Strict v17.0) ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
@@ -189,88 +206,78 @@ def engine_v17_0(q, data):
         val1 = reports[0].get(comp_key, 0)
         val2 = reports[1].get(comp_key, 0)
         diff = abs(val1 - val2)
-        if val1 > val2:
-            comparison_msg = f"Yes, {reports[0]['Adm']} has more {comp_key} than {reports[1]['Adm']} by {diff} records."
-        elif val2 > val1:
-            comparison_msg = f"No, {reports[1]['Adm']} actually has more {comp_key} than {reports[0]['Adm']} by {diff} records."
-        else:
-            comparison_msg = f"Both {reports[0]['Adm']} and {reports[1]['Adm']} have the same number of {comp_key} ({val1})."
+        if val1 > val2: comparison_msg = f"Yes, {reports[0]['Adm']} has more {comp_key}."
+        elif val2 > val1: comparison_msg = f"No, {reports[1]['Adm']} has more {comp_key}."
+        else: comparison_msg = f"Both are equal."
     else:
-        comparison_msg = " | ".join([f"{r['Adm']}: {r.get('Assignments', 0)} Assig {r.get('Allotments', 0)} Allot" for r in reports])
+        comparison_msg = " | ".join([f"{r['Adm']}: {r['Assignments']} A, {r['Allotments']} L" for r in reports])
 
     return final_df, reports, comparison_msg, 100, True
 
-# --- 6. UI FLOW (v17.4 with Visual Audio Indicator) ---
+# --- 3. UI FLOW v17.4 (With Sensing Logic) ---
 db = load_db()
 
-# مساحة التحكم في المايك
-st.markdown("### 🎙️ Audio Control Center")
-col_mic, col_status = st.columns([1, 3])
+st.markdown("### 🎙️ BASIRA Spectrum Sensing")
+# هنستخدم Session State عشان نعرف هل إحنا في حالة انتظار رد ولا لا
+if 'is_analyzing' not in st.session_state:
+    st.session_state.is_analyzing = False
+
+col_mic, col_info = st.columns([1, 4])
 
 with col_mic:
-    # المكون ده بيظهر مؤشر موجي (Waveform) أثناء الكلام تلقائياً
-    # وبيفصل فقط لما تدوس Stop يدوياً
+    # المكون الأصلي مع تفعيل خاصية الـ Start/Stop الصريحة
     voice_input = speech_to_text(
-        language='ar-EG', 
-        start_prompt="Click to Speak", 
-        stop_prompt="Stop & Analyze", 
-        just_once=False, 
-        key='BASIRA_SPEECH'
+        language='ar-EG',
+        start_prompt="START RECORDING",
+        stop_prompt="STOP & ANALYZE",
+        just_once=False,
+        key='V17_4_MIC'
     )
 
-with col_status:
+with col_info:
     if voice_input:
-        st.info(f"Captured: {voice_input}")
+        st.markdown(f'**<span style="color:green;">✅ Audio Captured:</span>** "{voice_input}"', unsafe_allow_html=True)
+        query = voice_input
     else:
-        st.write("Ready for spectrum inquiry...")
-
-# دعم الكتابة اليدوية بجانب الصوت
-query = st.text_input("Manual Query Override:", value=voice_input if voice_input else "", key="main_q")
+        # لو مفيش input، هنظهر "رادار" وهمي بيتحرك عشان تحس إن السيستم مستعد
+        st.markdown('**<div class="recording-active"></div> System is listening... Click Start to input query.**', unsafe_allow_html=True)
+        query = st.text_input("Or type here:", key="manual_input")
 
 if query and db is not None:
-    # وضع مؤشر تحميل (Spinner) ليعرف المستخدم أن المعالجة بدأت
-    with st.spinner('Analyzing Spectrum Data...'):
+    # الـ Spinner هو أحسن مؤشر إن "السؤال العبيط" أو "الذكي" بيتحلل حالياً
+    with st.spinner('📡 Analyzing Frequencies...'):
         res_df, reports, msg, conf, success = engine_v17_0(query, db)
     
     if success and reports:
-        # Replay the question visually and audibly
-        st.markdown("### 🔈 Processing Confirmation")
-        play_audio(query)
-        st.divider()
-
+        st.success("Analysis Complete")
         # 1. Flags Section
         cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with cols[i]:
                 st.markdown(f'<p style="text-align:center; font-weight:bold;">{COUNTRY_DISPLAY[r["Adm"]]["ar"]}</p>', unsafe_allow_html=True)
                 st.image(FLAGS.get(r['Adm']), use_container_width=True)
-                st.metric(f"{r['Adm']} Statistics", f"Total: {r['Total']}", f"A: {r.get('Assignments', 0)} | L: {r.get('Allotments', 0)}")
+                st.metric(f"{r['Adm']}", f"Total: {r['Total']}", f"A: {r['Assignments']} | L: {r['Allotments']}")
 
         st.divider()
 
-        # 2. Geospatial Map (Preserved)
+        # 2. Map & Dashboards (Preserved v17.0)
         if PLOTLY_AVAILABLE and not res_df.empty:
             map_data = res_df.dropna(subset=['lat_dec', 'lon_dec'])
             if not map_data.empty:
-                st.markdown("### 🌍 Geospatial Spectrum Distribution")
-                fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", hover_name="Site/Allotment Name", 
-                                           color="Adm", zoom=3, mapbox_style="carto-positron", height=500)
+                st.markdown("### 🌍 Geospatial Distribution")
+                fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", hover_name="Site/Allotment Name", color="Adm", zoom=3, mapbox_style="carto-positron", height=500)
                 st.plotly_chart(fig_map, use_container_width=True)
 
-        # 3. Dashboard Section (Preserved)
         m1, m2 = st.columns([1, 2])
         chart_df = pd.DataFrame(reports).set_index('Adm')
         with m1:
             st.metric("Confidence", f"{conf}%")
             if PLOTLY_AVAILABLE:
-                fig = px.bar(chart_df, y=["Assignments", "Allotments"], barmode="group", title="Technical Distribution")
+                fig = px.bar(chart_df, y=["Assignments", "Allotments"], barmode="group")
                 st.plotly_chart(fig, use_container_width=True)
-        with m2: 
-            st.bar_chart(chart_df[['Total']])
+        with m2: st.bar_chart(chart_df[['Total']])
         
         st.table(chart_df)
-        st.markdown("### 🔊 Assistant Response")
-        st.success(msg)
+        st.markdown("### 🔊 Response")
+        st.info(msg)
         play_audio(msg)
-        with st.expander("Technical Records (Filtered)"): 
-            st.dataframe(res_df)
