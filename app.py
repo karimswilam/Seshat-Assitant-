@@ -5,142 +5,166 @@ import io
 import re
 import asyncio
 import edge_tts
-import time
+import base64
+import numpy as np
+import sounddevice as sd
+from rapidfuzz import process, fuzz
 from streamlit_mic_recorder import mic_recorder
 
-# --- 1. CONFIG & SYSTEM UI ---
-st.set_page_config(layout="wide", page_title="Seshat AI v21.0")
+try:
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
 
-st.markdown("""
-    <style>
-    .reportview-container { background: #f8fafc; }
-    .stMetric { background: white; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; }
-    .engine-status { font-family: 'Courier New', monospace; font-size: 14px; color: #059669; }
-    </style>
-    """, unsafe_allow_html=True)
 
-# --- 2. ENGINE CONSTANTS (V17.0 PROTECTED) ---
-COUNTRY_MAP = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
-    'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة'],
-    'TUR': ['turkey', 'tur', 'تركيا'],
-    'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'GRC': ['greece', 'grc', 'اليونان'],
-    'ISR': ['israel', 'isr', 'اسرائيل']
-}
-
-SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية'],
-    'TV_KEY': ['tv', 'television', 'تلفزيون'],
-    'TOTAL_KEY': ['total', 'egmali', 'إجمالي', 'اجمالي']
-}
-
-STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
-STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
-
-# --- 3. FAIL-SAFE DATA LOADER (THE FIX) ---
-@st.cache_data
-def load_and_standardize_db():
-    files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
-    target = "Data.xlsx" if "Data.xlsx" in files else (files[0] if files else None)
-    
-    if not target:
-        st.error("❌ Data file missing from root directory!")
-        return None
-
+# =========================
+# 🎙️ LIVE AUDIO METER
+# =========================
+def get_audio_level(duration=0.3, fs=44100):
     try:
-        df = pd.read_excel(target)
-        # Force column names to be clean and detectable
-        df.columns = df.columns.astype(str).str.strip()
-        
-        # Mapping to prevent KeyError: 'Adm'
-        col_mapping = {
-            'Adm': ['Administration', 'Adm', 'Country', 'ADMS'],
-            'Notice Type': ['Notice Type', 'NT', 'Form', 'Type'],
-            'Site/Allotment Name': ['Site/Allotment Name', 'Site Name', 'Name']
-        }
-        
-        for standard, aliases in col_mapping.items():
-            for col in df.columns:
-                if col in aliases:
-                    df = df.rename(columns={col: standard})
-                    break
-        
-        # Final Verification
-        if 'Adm' not in df.columns:
-            st.error("❌ Critical: 'Adm' column not found or renamed correctly.")
-            return None
-            
-        return df
-    except Exception as e:
-        st.error(f"❌ Excel Processing Error: {e}")
-        return None
+        recording = sd.rec(int(duration * fs), samplerate=fs, channels=1)
+        sd.wait()
+        amplitude = np.linalg.norm(recording) / len(recording)
+        db = 20 * np.log10(amplitude + 1e-6)
+        return max(min((db + 60) / 60, 1), 0)  # normalize 0 → 1
+    except:
+        return 0
 
-# --- 4. THE CORE ENGINE (V17.0 LOGIC REBORN) ---
-def engine_v21(q, data):
-    q_low = q.lower()
-    selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
-    selected_adms = list(dict.fromkeys(selected_adms))
-    
-    if not selected_adms:
-        return None, [], "No countries identified in query.", 0, False
 
-    reports = []
-    final_df = pd.DataFrame()
-    mentions_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
-    mentions_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
+def render_audio_meter(level):
+    bar_html = f"""
+    <div style="width:100%; background:#222; border-radius:10px; padding:5px;">
+        <div style="width:{int(level*100)}%; height:20px; 
+                    background:linear-gradient(90deg, #22c55e, #eab308, #ef4444);
+                    border-radius:10px; transition: width 0.2s;">
+        </div>
+    </div>
+    """
+    st.markdown(bar_html, unsafe_allow_html=True)
 
-    for adm in selected_adms:
-        # Secure slicing to avoid KeyError or Empty Returns
-        adm_df = data[data['Adm'].astype(str).str.strip().str.upper() == adm].copy()
-        
-        a_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)])
-        l_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
-        
-        res = {
-            "Adm": adm,
-            "Total": a_count + l_count,
-            "Assignments": a_count,
-            "Allotments": l_count
-        }
-        reports.append(res)
-        final_df = pd.concat([final_df, adm_df], ignore_index=True)
 
-    # Simple Comparison Text for Voice
-    if len(reports) >= 2:
-        msg = f"Analysis complete for {len(reports)} countries. Comparison shows {reports[0]['Adm']} has {reports[0]['Total']} records vs {reports[1]['Adm']} with {reports[1]['Total']}."
+# =========================
+# 🎙️ SPEECH TO TEXT (WEB API)
+# =========================
+def speech_to_text(audio_bytes):
+    import requests
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {st.secrets['OPENAI_API_KEY']}"},
+            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+            data={"model": "gpt-4o-mini-transcribe"}
+        )
+        return response.json().get("text", "")
+    except:
+        return ""
+
+
+# =========================
+# STREAMLIT UI
+# =========================
+st.set_page_config(layout="wide", page_title="Seshat AI v17.0")
+
+st.title("🎙️ Voice Assistant Mode")
+
+# ===== MIC RECORDER =====
+audio = mic_recorder(
+    start_prompt="🎤 Start Recording",
+    stop_prompt="⏹ Stop",
+    key="recorder"
+)
+
+# ===== LIVE METER =====
+st.markdown("### 🔊 Mic Signal Level")
+level = get_audio_level()
+render_audio_meter(level)
+
+if level < 0.05:
+    st.warning("⚠️ No voice detected from microphone")
+
+# ===== PROCESS AUDIO =====
+if audio:
+    st.success("✅ Voice captured, processing...")
+
+    text = speech_to_text(audio['bytes'])
+
+    if not text.strip():
+        st.error("❌ No speech detected (empty audio)")
     else:
-        msg = f"Found {reports[0]['Total']} records for {reports[0]['Adm']}."
+        st.success(f"📝 Recognized Text: {text}")
 
-    return final_df, reports, msg, 100, True
+        query = text
 
-# --- 5. UI FLOW ---
-st.markdown("## 🛰️ Seshat Master Precision v21.0")
-db = load_and_standardize_db()
+        # =========================
+        # YOUR ORIGINAL ENGINE
+        # =========================
 
-if db is not None:
-    st.markdown('<p class="engine-status">✔️ DB_CORE: CONNECTED | ADM_FIELD: READY</p>', unsafe_allow_html=True)
-    
-    # Input Area
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        audio = mic_recorder(start_prompt="⏺️ START", stop_prompt="⏹️ STOP", key='v21_mic')
-    
-    with c2:
-        # Simulation of Voice-to-Text for testing (Should be replaced by actual STT)
-        input_text = st.text_input("Confirm Inquiry:", value="هي مصر عندها كم تخصيص اجمالي مقارنة بتركيا")
+        FLAGS = {
+            'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
+            'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
+            'GRC': "https://flagcdn.com/w640/gr.png", 'ISR': "https://flagcdn.com/w640/il.png"
+        }
 
-    if input_text:
-        res_df, reports, msg, conf, success = engine_v21(input_text, db)
-        
-        if success:
-            st.divider()
-            cols = st.columns(len(reports))
-            for i, r in enumerate(reports):
-                with cols[i]:
-                    st.metric(f"Country: {r['Adm']}", f"Total: {r['Total']}")
-                    st.write(f"Assig: {r['Assignments']} | Allot: {r['Allotments']}")
-            
-            st.success(f"🔊 {msg}")
+        COUNTRY_DISPLAY = {
+            'EGY': {'ar': 'جمهورية مصر العربية', 'en': 'Egypt'},
+            'ARS': {'ar': 'المملكة العربية السعودية', 'en': 'Saudi Arabia'},
+            'TUR': {'ar': 'الجمهورية التركية', 'en': 'Turkey'},
+            'CYP': {'ar': 'جمهورية قبرص', 'en': 'Cyprus'},
+            'GRC': {'ar': 'الجمهورية اليونانية', 'en': 'Greece'},
+            'ISR': {'ar': 'إسرائيل', 'en': 'Israel'}
+        }
+
+        STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
+        STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
+
+        COUNTRY_MAP = {
+            'EGY': ['egypt', 'egy', 'مصر'],
+            'ARS': ['saudi', 'ksa', 'السعودية'],
+            'TUR': ['turkey', 'تركيا'],
+            'CYP': ['cyprus', 'قبرص'],
+            'GRC': ['greece', 'اليونان'],
+            'ISR': ['israel', 'اسرائيل']
+        }
+
+        SYNONYMS = {
+            'TOTAL_KEY': ['total', 'اجمالي'],
+            'FM_KEY': ['fm', 'radio'],
+        }
+
+        @st.cache_data
+        def load_db():
+            files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
+            if files:
+                return pd.read_excel(files[0])
+            return None
+
+        db = load_db()
+
+        def simple_engine(q, df):
+            q = q.lower()
+            selected = [k for k, v in COUNTRY_MAP.items() if any(x in q for x in v)]
+            if not selected:
+                return None, "❌ Could not detect country"
+
+            df = df[df['Adm'].isin(selected)]
+            return df, f"✅ Found {len(df)} records"
+
+        if db is not None:
+            res_df, msg = simple_engine(query, db)
+
+            st.markdown("### 🔊 Assistant Response")
+            st.success(msg)
+
+            if res_df is not None:
+                st.dataframe(res_df)
+
+        else:
+            st.error("❌ No database found")
+
+# ===== TEXT FALLBACK =====
+st.divider()
+query_text = st.text_input("⌨️ Or type your question")
+
+if query_text:
+    st.info(f"Typed: {query_text}")
