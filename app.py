@@ -17,154 +17,163 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-
 # =========================
-# 🎙️ LIVE AUDIO METER
+# 🎙️ LIVE AUDIO METER (FIXED)
 # =========================
-def get_audio_level(duration=0.3, fs=44100):
+def get_audio_level(duration=0.1, fs=44100): # قللت الـ duration عشان الـ UI ميبقاش بطيء
     try:
         recording = sd.rec(int(duration * fs), samplerate=fs, channels=1)
         sd.wait()
         amplitude = np.linalg.norm(recording) / len(recording)
         db = 20 * np.log10(amplitude + 1e-6)
-        return max(min((db + 60) / 60, 1), 0)  # normalize 0 → 1
+        return max(min((db + 60) / 60, 1), 0)
     except:
         return 0
 
-
 def render_audio_meter(level):
+    color = "#22c55e" if level < 0.7 else "#ef4444"
     bar_html = f"""
     <div style="width:100%; background:#222; border-radius:10px; padding:5px;">
-        <div style="width:{int(level*100)}%; height:20px; 
-                    background:linear-gradient(90deg, #22c55e, #eab308, #ef4444);
-                    border-radius:10px; transition: width 0.2s;">
+        <div style="width:{int(level*100)}%; height:15px; 
+                    background:{color};
+                    border-radius:10px; transition: width 0.1s ease-in-out;">
         </div>
     </div>
     """
     st.markdown(bar_html, unsafe_allow_html=True)
 
-
 # =========================
-# 🎙️ SPEECH TO TEXT (WEB API)
+# 🎙️ SPEECH TO TEXT (WHISPER API)
 # =========================
 def speech_to_text(audio_bytes):
     import requests
     try:
+        # التصحيح: الموديل الرسمي هو whisper-1
         response = requests.post(
             "https://api.openai.com/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {st.secrets['OPENAI_API_KEY']}"},
             files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-            data={"model": "gpt-4o-mini-transcribe"}
+            data={"model": "whisper-1"} 
         )
         return response.json().get("text", "")
-    except:
+    except Exception as e:
+        st.error(f"STT Error: {e}")
         return ""
 
+# =========================
+# 🔊 TEXT TO SPEECH (EDGE-TTS)
+# =========================
+async def generate_speech(text):
+    communicate = edge_tts.Communicate(text, "ar-EG-SalmaNeural")
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+    return base64.b64encode(audio_data).decode()
+
+def play_audio(b64_string):
+    md = f"""
+        <audio autoplay="true">
+        <source src="data:audio/mp3;base64,{b64_string}" type="audio/mp3">
+        </audio>
+        """
+    st.markdown(md, unsafe_allow_html=True)
 
 # =========================
 # STREAMLIT UI
 # =========================
-st.set_page_config(layout="wide", page_title="Seshat AI v17.0")
+st.set_page_config(layout="wide", page_title="Seshat AI v21.0")
 
-st.title("🎙️ Voice Assistant Mode")
+st.title("🎙️ Seshat Master Precision v21.0")
 
-# ===== MIC RECORDER =====
-audio = mic_recorder(
-    start_prompt="🎤 Start Recording",
-    stop_prompt="⏹ Stop",
-    key="recorder"
-)
+# Setup Database logic
+@st.cache_data
+def load_db():
+    files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
+    if files:
+        df = pd.read_excel(files[0])
+        df.columns = df.columns.astype(str).str.strip()
+        return df
+    return None
 
-# ===== LIVE METER =====
-st.markdown("### 🔊 Mic Signal Level")
-level = get_audio_level()
-render_audio_meter(level)
+db = load_db()
 
-if level < 0.05:
-    st.warning("⚠️ No voice detected from microphone")
+# UI Layout
+col_mic, col_status = st.columns([1, 1])
 
-# ===== PROCESS AUDIO =====
-if audio:
-    st.success("✅ Voice captured, processing...")
+with col_mic:
+    audio_data = mic_recorder(
+        start_prompt="🎤 ابدأ التحدث",
+        stop_prompt="⏹ توقف",
+        key="recorder"
+    )
 
-    text = speech_to_text(audio['bytes'])
+with col_status:
+    st.markdown("### 🔊 Mic Signal Level")
+    level = get_audio_level()
+    render_audio_meter(level)
+    if level < 0.02:
+        st.caption("🔇 المايك هادئ...")
 
-    if not text.strip():
-        st.error("❌ No speech detected (empty audio)")
-    else:
-        st.success(f"📝 Recognized Text: {text}")
+# =========================
+# ⚙️ ENGINE WITH FUZZY MATCHING
+# =========================
+COUNTRY_MAP = {
+    'EGY': ['مصر', 'المصرية', 'egypt'],
+    'ARS': ['السعودية', 'المملكة', 'saudi'],
+    'TUR': ['تركيا', 'التركية', 'turkey'],
+    'ISR': ['اسرائيل', 'israel']
+}
 
-        query = text
+def enhanced_engine(q, df):
+    q = q.lower()
+    selected = []
+    
+    # استخدام RapidFuzz للبحث عن اسم الدولة
+    for code, keywords in COUNTRY_MAP.items():
+        for kw in keywords:
+            if fuzz.partial_ratio(kw, q) > 85: # دقة التطابق
+                selected.append(code)
+                break
+                
+    if not selected:
+        return None, "لم أستطع تحديد الدولة في استفسارك."
 
-        # =========================
-        # YOUR ORIGINAL ENGINE
-        # =========================
+    # تأمين عمود الـ Adm (Fix لـ KeyError)
+    adm_col = 'Adm' if 'Adm' in df.columns else df.columns[0]
+    res_df = df[df[adm_col].isin(selected)]
+    
+    msg = f"تم العثور على {len(res_df)} سجل لـ {', '.join(selected)}."
+    return res_df, msg
 
-        FLAGS = {
-            'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
-            'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
-            'GRC': "https://flagcdn.com/w640/gr.png", 'ISR': "https://flagcdn.com/w640/il.png"
-        }
-
-        COUNTRY_DISPLAY = {
-            'EGY': {'ar': 'جمهورية مصر العربية', 'en': 'Egypt'},
-            'ARS': {'ar': 'المملكة العربية السعودية', 'en': 'Saudi Arabia'},
-            'TUR': {'ar': 'الجمهورية التركية', 'en': 'Turkey'},
-            'CYP': {'ar': 'جمهورية قبرص', 'en': 'Cyprus'},
-            'GRC': {'ar': 'الجمهورية اليونانية', 'en': 'Greece'},
-            'ISR': {'ar': 'إسرائيل', 'en': 'Israel'}
-        }
-
-        STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
-        STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
-
-        COUNTRY_MAP = {
-            'EGY': ['egypt', 'egy', 'مصر'],
-            'ARS': ['saudi', 'ksa', 'السعودية'],
-            'TUR': ['turkey', 'تركيا'],
-            'CYP': ['cyprus', 'قبرص'],
-            'GRC': ['greece', 'اليونان'],
-            'ISR': ['israel', 'اسرائيل']
-        }
-
-        SYNONYMS = {
-            'TOTAL_KEY': ['total', 'اجمالي'],
-            'FM_KEY': ['fm', 'radio'],
-        }
-
-        @st.cache_data
-        def load_db():
-            files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
-            if files:
-                return pd.read_excel(files[0])
-            return None
-
-        db = load_db()
-
-        def simple_engine(q, df):
-            q = q.lower()
-            selected = [k for k, v in COUNTRY_MAP.items() if any(x in q for x in v)]
-            if not selected:
-                return None, "❌ Could not detect country"
-
-            df = df[df['Adm'].isin(selected)]
-            return df, f"✅ Found {len(df)} records"
-
-        if db is not None:
-            res_df, msg = simple_engine(query, db)
-
-            st.markdown("### 🔊 Assistant Response")
-            st.success(msg)
-
-            if res_df is not None:
-                st.dataframe(res_df)
-
+# PROCESS
+if audio_data:
+    with st.spinner("⏳ جاري تحليل الصوت..."):
+        recognized_text = speech_to_text(audio_data['bytes'])
+        
+        if recognized_text:
+            st.info(f"📝 النص المستخرج: {recognized_text}")
+            
+            if db is not None:
+                final_df, response_text = enhanced_engine(recognized_text, db)
+                
+                st.success(response_text)
+                
+                # تشغيل الرد الصوتي
+                b64_audio = asyncio.run(generate_speech(response_text))
+                play_audio(b64_audio)
+                
+                if final_df is not None:
+                    st.dataframe(final_df)
+            else:
+                st.error("❌ قاعدة البيانات غير موجودة!")
         else:
-            st.error("❌ No database found")
+            st.warning("⚠️ لم يتم التعرف على كلمات واضحة.")
 
-# ===== TEXT FALLBACK =====
+# Keep your text input as fallback
 st.divider()
-query_text = st.text_input("⌨️ Or type your question")
-
-if query_text:
-    st.info(f"Typed: {query_text}")
+manual_query = st.text_input("⌨️ أو اكتب استفسارك هنا:")
+if manual_query and db is not None:
+    res, msg = enhanced_engine(manual_query, db)
+    st.write(msg)
+    if res is not None: st.dataframe(res)
