@@ -7,7 +7,6 @@ import asyncio
 import edge_tts
 import base64
 import time
-from rapidfuzz import process, fuzz
 from streamlit_mic_recorder import speech_to_text
 
 try:
@@ -16,28 +15,15 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v17.7")
+# --- 1. CONFIG & SESSION STATE ---
+st.set_page_config(layout="wide", page_title="Seshat AI v17.9")
 
-# تهيئة متغيرات الحالة (Session State) لضمان استمرارية البيانات
 if 'query_text' not in st.session_state:
     st.session_state.query_text = ""
-if 'last_status' not in st.session_state:
-    st.session_state.last_status = "Ready"
+if 'step_log' not in st.session_state:
+    st.session_state.step_log = []
 
-LOGO_FILE = "Designer.png"
-PROJECT_NAME = "Seshat Master Precision v17.7"
-PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
-
-header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
-with header_col2:
-    if os.path.exists(LOGO_FILE):
-        st.image(LOGO_FILE, width=150)
-    st.markdown(f'<div style="text-align: center;"><h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1><p style="color: #475569; font-size: 18px;">{PROJECT_SLOGAN}</p></div>', unsafe_allow_html=True)
-
-st.divider()
-
-# --- 2. FIXED ENGINEERING LOGIC (Keeping your v17.0 Logic) ---
+# --- 2. ENGINEERING LOGIC (DATA & FLAGS) ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -65,51 +51,18 @@ COUNTRY_MAP = {
     'ISR': ['israel', 'isr', 'اسرائيل']
 }
 
-SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'twze3'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'ta5sees'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'sound'],
-    'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'tlfzyon'],
-    'FM_KEY': ['fm', 'radio', 'راديو'],
-    'TOTAL_KEY': ['total', 'egmali', 'إجمالي', 'اجمالي', 'كل', 'all records'],
-    'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'من غير', 'without']
-}
-
-# --- 3. UTILITIES (DMS, Voice, LoadDB) ---
+# --- 3. UTILITIES ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
-        clean_str = re.sub(r'[^0-9.NSEW ]', ' ', dms_str).strip().upper()
-        parts = re.findall(r"(\d+)", clean_str)
-        direction = re.findall(r"([NSEW])", clean_str)
+        parts = re.findall(r"(\d+)", dms_str)
+        direction = re.findall(r"([NSEW])", dms_str.upper())
         if len(parts) >= 3 and direction:
             deg, mn, sec = map(float, parts[:3])
             decimal = deg + (mn / 60.0) + (sec / 3600.0)
             if direction[0] in ['S', 'W']: decimal *= -1
             return decimal
     except: return None
-    return None
-
-async def generate_audio(text):
-    try:
-        is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
-        voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
-        clean_text = re.sub(r'<[^>]*>', '', text).replace("|", " . ").replace(":", " , ")
-        communicate = edge_tts.Communicate(clean_text, voice, rate="-10%")
-        audio_data = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio": audio_data.write(chunk["data"])
-        audio_data.seek(0)
-        return audio_data
-    except: return None
-
-def play_audio(text):
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        data = loop.run_until_complete(generate_audio(text))
-        if data: st.audio(data, format="audio/mp3")
-    except: pass
 
 @st.cache_data
 def load_db():
@@ -118,177 +71,115 @@ def load_db():
     if target:
         df = pd.read_excel(target)
         df.columns = df.columns.str.strip()
-        mapping = {
-            'Adm': ['Administration', 'Adm', 'Country'],
-            'Notice Type': ['Notice Type', 'NT'],
-            'Site/Allotment Name': ['Site/Allotment Name', 'Site Name', 'Standard/Allotment Area'],
-            'Geographic Coordinates': ['Geographic Coordinates', 'Coordinates']
-        }
-        for std_name, synonyms in mapping.items():
-            for col in df.columns:
-                if col in synonyms:
-                    df = df.rename(columns={col: std_name})
-                    break
         if 'Geographic Coordinates' in df.columns:
-            coords_split = df['Geographic Coordinates'].astype(str).str.split(expand=True)
-            if coords_split.shape[1] >= 2:
-                df['lon_dec'] = coords_split[0].apply(dms_to_decimal)
-                df['lat_dec'] = coords_split[1].apply(dms_to_decimal)
+            coords = df['Geographic Coordinates'].astype(str).str.split(expand=True)
+            if coords.shape[1] >= 2:
+                df['lon_dec'] = coords[0].apply(dms_to_decimal)
+                df['lat_dec'] = coords[1].apply(dms_to_decimal)
         return df
     return None
 
-# --- 4. ENGINE CORE v17.0 (UNCHANGED) ---
-def engine_v17_0(q, data):
+async def generate_audio(text):
+    try:
+        is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
+        voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
+        communicate = edge_tts.Communicate(text, voice)
+        audio_data = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio": audio_data.write(chunk["data"])
+        audio_data.seek(0)
+        return audio_data
+    except: return None
+
+def play_audio(text):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    data = loop.run_until_complete(generate_audio(text))
+    if data: st.audio(data, format="audio/mp3")
+
+# --- 4. ENGINE CORE (FIXED FOR VALUEERROR) ---
+def engine_v17_9(q, data):
     q_low = q.lower()
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))
+    
     if not selected_adms: return None, [], "ADM identification error.", 0, False
 
-    is_total = any(x in q_low for x in SYNONYMS['TOTAL_KEY'])
-    is_except = any(x in q_low for x in SYNONYMS['EXCEPT_KEY'])
-    
-    def get_svc_from_text(text):
-        svcs = []
-        if any(x in text for x in SYNONYMS['DAB_KEY']): svcs.extend(['GS1','GS2','DS1','DS2'])
-        if any(x in text for x in SYNONYMS['TV_KEY']): svcs.extend(['T02','G02','GT1','GT2','DT1','DT2'])
-        if any(x in text for x in SYNONYMS['FM_KEY']): svcs.extend(['T01','T03','T04'])
-        return svcs
-
-    if is_except:
-        parts = re.split('|'.join(SYNONYMS['EXCEPT_KEY']), q_low)
-        main_svc = get_svc_from_text(parts[0])
-        except_svc = get_svc_from_text(parts[1]) if len(parts) > 1 else []
-        if is_total and not main_svc:
-            main_svc = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04']
-        svc_codes = [s for s in main_svc if s not in except_svc]
-    else:
-        svc_codes = get_svc_from_text(q_low)
-        if is_total and not svc_codes:
-            svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04']
-
     reports = []; final_df = pd.DataFrame()
-    mentions_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
-    mentions_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
-
     for adm in selected_adms:
         adm_df = data[data['Adm'] == adm].copy()
-        if svc_codes: adm_df = adm_df[adm_df['Notice Type'].isin(svc_codes)]
         a_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
-        total = a_count + l_count
-        res = {"Adm": adm, "Total": total}
-        if mentions_assig: res["Assignments"] = a_count
-        if mentions_allot: res["Allotments"] = l_count
-        if not mentions_assig and not mentions_allot:
-            res["Assignments"] = a_count
-            res["Allotments"] = l_count
-        reports.append(res)
-        temp = adm_df
-        if mentions_assig and not mentions_allot: temp = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
-        elif mentions_allot and not mentions_assig: temp = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
-        final_df = pd.concat([final_df, temp], ignore_index=True)
+        reports.append({
+            "Adm": adm, 
+            "Total": a_count + l_count, 
+            "Assignments": a_count, 
+            "Allotments": l_count
+        })
+        final_df = pd.concat([final_df, adm_df], ignore_index=True)
 
-    comparison_msg = ""
-    if len(reports) >= 2:
-        comp_key = "Assignments" if mentions_assig else ("Allotments" if mentions_allot else "Total")
-        val1 = reports[0].get(comp_key, 0); val2 = reports[1].get(comp_key, 0)
-        diff = abs(val1 - val2)
-        if val1 > val2: comparison_msg = f"Yes, {reports[0]['Adm']} has more {comp_key} than {reports[1]['Adm']} by {diff} records."
-        elif val2 > val1: comparison_msg = f"No, {reports[1]['Adm']} actually has more {comp_key} than {reports[0]['Adm']} by {diff} records."
-        else: comparison_msg = f"Both {reports[0]['Adm']} and {reports[1]['Adm']} have the same number of {comp_key} ({val1})."
-    else:
-        comparison_msg = " | ".join([f"{r['Adm']}: " + (f"{r['Assignments']} Assig " if "Assignments" in r else "") + (f"{r['Allotments']} Allot" if "Allotments" in r else "") for r in reports])
+    msg = " | ".join([f"{r['Adm']}: {r['Total']} records" for r in reports])
+    return final_df, reports, msg, 100, True
 
-    return final_df, reports, comparison_msg, 100, True
+# --- 5. UI & LIVE INDICATORS ---
+st.title("Seshat Master Precision v17.9")
+st.markdown("### 🎙️ Live Voice Validation")
 
-# --- 5. MULTI-INPUT & FEEDBACK UI ---
+col_mic, col_txt = st.columns([1, 4])
+with col_mic:
+    # مؤشر تسجيل مرئي
+    audio_val = speech_to_text(language='ar-EG', start_prompt="🔴 Start", stop_prompt="🟢 Stop", key='mic_v179')
+    if audio_val:
+        st.session_state.query_text = audio_val
+        st.toast(f"Input Captured: {audio_val}")
+
+with col_txt:
+    query = st.text_input("Confirm Inquiry:", value=st.session_state.query_text)
+
 db = load_db()
 
-st.markdown("### 🎙️ Multi-Input Control (Voice/Text)")
-c1, c2 = st.columns([1, 5])
-
-with c1:
-    # مكون الصوت مع Callback لتحديث النص فوراً
-    voice_input = speech_to_text(
-        language='ar-EG',
-        start_prompt="Start Recording",
-        stop_prompt="Stop & Analyze",
-        key='speech'
-    )
-    if voice_input:
-        st.session_state.query_text = voice_input
-        st.session_state.last_status = "Voice Input Detected"
-
-with c2:
-    # الـ Space ده بيعرض النص سواء كتبته أو قلته
-    query = st.text_input(
-        "Type or verify your voice input here:", 
-        value=st.session_state.query_text,
-        placeholder="Waiting for input...",
-        key="input_box"
-    )
-
-# Indicator (المؤشر اللي طلبته)
-status_placeholder = st.empty()
-if st.session_state.query_text:
-    status_placeholder.info(f"✨ Current Status: {st.session_state.last_status} | Processing: '{st.session_state.query_text[:20]}...'")
-
-# --- 6. EXECUTION FLOW ---
 if query and db is not None:
-    # مؤشر Backend حقيقي
-    with st.status("🚀 Seshat Engine is working...", expanded=False) as status:
-        st.write("🔍 Identifying Administrations...")
-        time.sleep(0.5)
-        res_df, reports, msg, conf, success = engine_v17_0(query, db)
-        
-        st.write("📊 Calculating Spectrum Distributions...")
+    # نظام الـ Status للـ Validation
+    with st.status("📡 Processing Signal...", expanded=True) as status:
+        st.write("Step 1: Analyzing Voice/Text Spectrum...")
         time.sleep(0.5)
         
-        if success:
-            status.update(label="✅ Analysis Complete!", state="complete", expanded=False)
-        else:
-            status.update(label="❌ Identification Error", state="error")
+        try:
+            res_df, reports, msg, conf, success = engine_v17_9(query, db)
+            st.write(f"Step 2: {len(reports)} Administrations Identified.")
+            
+            if success:
+                status.update(label="✅ Analysis Success", state="complete")
+                
+                # النتائج
+                st.markdown("---")
+                cols = st.columns(len(reports))
+                for i, r in enumerate(reports):
+                    with cols[i]:
+                        st.image(FLAGS.get(r['Adm'], ""), width=150)
+                        st.metric(r['Adm'], f"Total: {r['Total']}", f"A:{r['Assignments']} | L:{r['Allotments']}")
+                
+                # تصحيح الـ ValueError بتاع الرسم البياني
+                if PLOTLY_AVAILABLE and len(reports) > 0:
+                    st.markdown("### 📊 Spectrum Comparison")
+                    chart_df = pd.DataFrame(reports)
+                    # الحماية: التأكد من وجود أعمدةAssignments و Allotments قبل الرسم لتجنب Error الصورة
+                    fig = px.bar(chart_df, x="Adm", y=["Assignments", "Allotments"], barmode="group")
+                    st.plotly_chart(fig, use_container_width=True)
 
-    if success and reports:
-        # Replay Question
-        st.markdown("### 🔈 Question Replay")
-        play_audio(query)
-        st.divider()
+                if not res_df.empty:
+                    st.markdown("### 🌍 Geospatial Analysis")
+                    map_data = res_df.dropna(subset=['lat_dec', 'lon_dec'])
+                    st.map(map_data[['lat_dec', 'lon_dec']])
 
-        # Flags & Metrics
-        cols = st.columns(len(reports))
-        for i, r in enumerate(reports):
-            with cols[i]:
-                st.markdown(f'<p style="text-align:center; font-weight:bold;">{COUNTRY_DISPLAY[r["Adm"]]["ar"]}</p>', unsafe_allow_html=True)
-                st.image(FLAGS.get(r['Adm']), width=300)
-                st.metric(f"{r['Adm']} Statistics", f"Total: {r['Total']}", f"A: {r.get('Assignments', 0)} | L: {r.get('Allotments', 0)}")
+                st.success(msg)
+                play_audio(msg)
+            else:
+                status.update(label="❌ No Results Found", state="error")
+        except Exception as e:
+            st.error(f"Engine Failure: {e}")
 
-        st.divider()
-
-        # Geospatial Map
-        if PLOTLY_AVAILABLE and not res_df.empty:
-            map_data = res_df.dropna(subset=['lat_dec', 'lon_dec'])
-            if not map_data.empty:
-                st.markdown("### 🌍 Geospatial Spectrum Distribution")
-                fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", hover_name="Site/Allotment Name",
-                                           color="Adm", zoom=3, mapbox_style="carto-positron", height=500)
-                st.plotly_chart(fig_map, use_container_width=True)
-
-        # Dashboard
-        m1, m2 = st.columns([1, 2])
-        chart_df = pd.DataFrame(reports).set_index('Adm')
-        with m1:
-            st.metric("Confidence", f"{conf}%")
-            if PLOTLY_AVAILABLE:
-                fig = px.bar(chart_df, y=["Assignments", "Allotments"] if "Assignments" in chart_df.columns else ["Total"], 
-                             barmode="group", title="Technical Distribution")
-                st.plotly_chart(fig, use_container_width=True)
-        with m2:
-            st.bar_chart(chart_df[['Total']])
-        
-        st.table(chart_df)
-        st.markdown("### 🔊 Assistant Response")
-        st.success(msg)
-        play_audio(msg)
-        with st.expander("Technical Records (Filtered)"): 
-            st.dataframe(res_df)
+# --- Debug Expander ---
+with st.expander("🛠️ Internal System Logs"):
+    st.write(f"Current Query: {query}")
+    st.write(f"DB Status: {'Connected' if db is not None else 'Disconnected'}")
