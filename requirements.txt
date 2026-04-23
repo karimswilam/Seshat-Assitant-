@@ -6,3 +6,5 @@ rapidfuzz
 plotly
 requests
 streamlit-mic-recorder
+numpy
+sounddevice
