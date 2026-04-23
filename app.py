@@ -1,179 +1,105 @@
 import streamlit as st
 import pandas as pd
 import os
-import io
-import re
 import asyncio
 import edge_tts
 import base64
-import numpy as np
-import sounddevice as sd
-from rapidfuzz import process, fuzz
+import requests
+from rapidfuzz import fuzz
 from streamlit_mic_recorder import mic_recorder
 
-try:
-    import plotly.express as px
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
+# --- 1. CONFIG ---
+st.set_page_config(layout="wide", page_title="Seshat Master v21.5")
 
-# =========================
-# 🎙️ LIVE AUDIO METER (FIXED)
-# =========================
-def get_audio_level(duration=0.1, fs=44100): # قللت الـ duration عشان الـ UI ميبقاش بطيء
+# --- 2. DATA LOADER (ANTI-KEYERROR) ---
+@st.cache_data
+def load_and_fix_db():
+    files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
+    if not files: return None
     try:
-        recording = sd.rec(int(duration * fs), samplerate=fs, channels=1)
-        sd.wait()
-        amplitude = np.linalg.norm(recording) / len(recording)
-        db = 20 * np.log10(amplitude + 1e-6)
-        return max(min((db + 60) / 60, 1), 0)
-    except:
-        return 0
+        df = pd.read_excel(files[0])
+        # التخلص من أي مسافات في أسماء الأعمدة (حل KeyError)
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+    except Exception as e:
+        st.error(f"Error loading DB: {e}")
+        return None
 
-def render_audio_meter(level):
-    color = "#22c55e" if level < 0.7 else "#ef4444"
-    bar_html = f"""
-    <div style="width:100%; background:#222; border-radius:10px; padding:5px;">
-        <div style="width:{int(level*100)}%; height:15px; 
-                    background:{color};
-                    border-radius:10px; transition: width 0.1s ease-in-out;">
-        </div>
-    </div>
-    """
-    st.markdown(bar_html, unsafe_allow_html=True)
+db = load_and_fix_db()
 
-# =========================
-# 🎙️ SPEECH TO TEXT (WHISPER API)
-# =========================
-def speech_to_text(audio_bytes):
-    import requests
+# --- 3. SPEECH ENGINES ---
+async def text_to_speech_logic(text):
+    communicate = edge_tts.Communicate(text, "ar-EG-SalmaNeural")
+    data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio": data += chunk["data"]
+    return base64.b64encode(data).decode()
+
+def speech_to_text_whisper(audio_bytes):
     try:
-        # التصحيح: الموديل الرسمي هو whisper-1
+        # تأكد من وضع المفتاح في Streamlit Secrets
+        api_key = st.secrets["OPENAI_API_KEY"]
         response = requests.post(
             "https://api.openai.com/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {st.secrets['OPENAI_API_KEY']}"},
+            headers={"Authorization": f"Bearer {api_key}"},
             files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-            data={"model": "whisper-1"} 
+            data={"model": "whisper-1"}
         )
         return response.json().get("text", "")
-    except Exception as e:
-        st.error(f"STT Error: {e}")
-        return ""
+    except: return ""
 
-# =========================
-# 🔊 TEXT TO SPEECH (EDGE-TTS)
-# =========================
-async def generate_speech(text):
-    communicate = edge_tts.Communicate(text, "ar-EG-SalmaNeural")
-    audio_data = b""
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            audio_data += chunk["data"]
-    return base64.b64encode(audio_data).decode()
-
-def play_audio(b64_string):
-    md = f"""
-        <audio autoplay="true">
-        <source src="data:audio/mp3;base64,{b64_string}" type="audio/mp3">
-        </audio>
-        """
-    st.markdown(md, unsafe_allow_html=True)
-
-# =========================
-# STREAMLIT UI
-# =========================
-st.set_page_config(layout="wide", page_title="Seshat AI v21.0")
-
-st.title("🎙️ Seshat Master Precision v21.0")
-
-# Setup Database logic
-@st.cache_data
-def load_db():
-    files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
-    if files:
-        df = pd.read_excel(files[0])
-        df.columns = df.columns.astype(str).str.strip()
-        return df
-    return None
-
-db = load_db()
-
-# UI Layout
-col_mic, col_status = st.columns([1, 1])
-
-with col_mic:
-    audio_data = mic_recorder(
-        start_prompt="🎤 ابدأ التحدث",
-        stop_prompt="⏹ توقف",
-        key="recorder"
-    )
-
-with col_status:
-    st.markdown("### 🔊 Mic Signal Level")
-    level = get_audio_level()
-    render_audio_meter(level)
-    if level < 0.02:
-        st.caption("🔇 المايك هادئ...")
-
-# =========================
-# ⚙️ ENGINE WITH FUZZY MATCHING
-# =========================
+# --- 4. ENGINE LOGIC (V17.0 REBORN) ---
 COUNTRY_MAP = {
-    'EGY': ['مصر', 'المصرية', 'egypt'],
-    'ARS': ['السعودية', 'المملكة', 'saudi'],
-    'TUR': ['تركيا', 'التركية', 'turkey'],
-    'ISR': ['اسرائيل', 'israel']
+    'EGY': ['مصر', 'egypt', 'المصرية'],
+    'TUR': ['تركيا', 'turkey', 'التركية'],
+    'ARS': ['السعودية', 'saudi', 'المملكة']
 }
 
-def enhanced_engine(q, df):
+def analyze_query(q, data):
     q = q.lower()
-    selected = []
+    selected_adm = None
+    for code, terms in COUNTRY_MAP.items():
+        if any(term in q for term in terms) or any(fuzz.partial_ratio(term, q) > 80 for term in terms):
+            selected_adm = code
+            break
     
-    # استخدام RapidFuzz للبحث عن اسم الدولة
-    for code, keywords in COUNTRY_MAP.items():
-        for kw in keywords:
-            if fuzz.partial_ratio(kw, q) > 85: # دقة التطابق
-                selected.append(code)
-                break
-                
-    if not selected:
-        return None, "لم أستطع تحديد الدولة في استفسارك."
+    if not selected_adm: return None, "لم أستطع تحديد الدولة."
 
-    # تأمين عمود الـ Adm (Fix لـ KeyError)
-    adm_col = 'Adm' if 'Adm' in df.columns else df.columns[0]
-    res_df = df[df[adm_col].isin(selected)]
-    
-    msg = f"تم العثور على {len(res_df)} سجل لـ {', '.join(selected)}."
+    # البحث عن العمود الصحيح بغض النظر عن الحالة (Adm / adm / ADM)
+    col = next((c for c in data.columns if c.lower() == 'adm'), None)
+    if not col: return None, "Error: 'Adm' column missing!"
+
+    res_df = data[data[col].astype(str).str.contains(selected_adm, case=False)]
+    msg = f"تحليل {selected_adm}: تم العثور على {len(res_df)} سجل."
     return res_df, msg
 
-# PROCESS
-if audio_data:
-    with st.spinner("⏳ جاري تحليل الصوت..."):
-        recognized_text = speech_to_text(audio_data['bytes'])
-        
-        if recognized_text:
-            st.info(f"📝 النص المستخرج: {recognized_text}")
-            
-            if db is not None:
-                final_df, response_text = enhanced_engine(recognized_text, db)
-                
-                st.success(response_text)
-                
-                # تشغيل الرد الصوتي
-                b64_audio = asyncio.run(generate_speech(response_text))
-                play_audio(b64_audio)
-                
-                if final_df is not None:
-                    st.dataframe(final_df)
-            else:
-                st.error("❌ قاعدة البيانات غير موجودة!")
-        else:
-            st.warning("⚠️ لم يتم التعرف على كلمات واضحة.")
+# --- 5. UI ---
+st.title("🛰️ Seshat Master Precision v21.5")
+st.caption("Project BASIRA | Digital Spectrum Governance")
 
-# Keep your text input as fallback
-st.divider()
-manual_query = st.text_input("⌨️ أو اكتب استفسارك هنا:")
-if manual_query and db is not None:
-    res, msg = enhanced_engine(manual_query, db)
-    st.write(msg)
-    if res is not None: st.dataframe(res)
+if db is not None:
+    st.success("✔️ Database Connected & Optimized")
+    
+    # الـ Mic Recorder هو الحل الوحيد للـ Cloud بدل sounddevice
+    audio_input = mic_recorder(start_prompt="🎤 Start Voice Command", stop_prompt="⏹ Stop & Analyze", key="basira_mic")
+    
+    if audio_input:
+        st.audio(audio_input['bytes']) # Feedback للمستخدم
+        with st.spinner("Processing Signal..."):
+            text = speech_to_text_whisper(audio_input['bytes'])
+            if text:
+                st.info(f"Recognized: {text}")
+                res, msg = analyze_query(text, db)
+                st.success(msg)
+                
+                # الرد الصوتي
+                b64_audio = asyncio.run(text_to_speech_logic(msg))
+                st.markdown(f'<audio autoplay src="data:audio/mp3;base64,{b64_audio}">', unsafe_allow_html=True)
+                
+                if res is not None:
+                    st.dataframe(res)
+            else:
+                st.error("Could not transcribe audio.")
+
+else:
+    st.error("❌ Please upload Data.xlsx to the root directory.")
