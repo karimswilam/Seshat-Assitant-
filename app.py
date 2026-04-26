@@ -5,72 +5,57 @@ import os, io, time, asyncio
 import speech_recognition as sr
 import edge_tts
 from streamlit_mic_recorder import mic_recorder
-from rapidfuzz import fuzz
+from pydub import AudioSegment
 import plotly.graph_objects as go
 
-# ---------------- CONFIG ----------------
-st.set_page_config(layout="wide", page_title="Seshat AI v30 – Voice Core")
+# -------------------------------------------------
+st.set_page_config(layout="wide", page_title="Seshat AI – Voice Assistant Core")
 
-FLAGS = {
-    'EGY': "https://flagcdn.com/w640/eg.png",
-    'ARS': "https://flagcdn.com/w640/sa.png",
-    'TUR': "https://flagcdn.com/w640/tr.png",
-    'CYP': "https://flagcdn.com/w640/cy.png",
-    'GRC': "https://flagcdn.com/w640/gr.png",
-    'ISR': "https://flagcdn.com/w640/il.png"
-}
-
-COUNTRY_MAP = {
-    'EGY': ['egypt', 'egy', 'مصر'],
-    'ARS': ['saudi', 'ars', 'ksa', 'السعودية'],
-    'TUR': ['turkey', 'tur', 'تركيا'],
-    'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'GRC': ['greece', 'grc', 'اليونان'],
-    'ISR': ['israel', 'isr', 'اسرائيل']
-}
-
-SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'توزيع'],
-    'ASSIG_KEY': ['assignment', 'تخصيص'],
-    'DAB_KEY': ['dab', 'داب'],
-    'TOTAL_KEY': ['total', 'اجمالي']
-}
-
-# ---------------- DB ----------------
+# -------------------------------------------------
 @st.cache_data
 def load_db():
-    files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
-    target = "Data.xlsx" if "Data.xlsx" in files else None
-    if not target: return None
-    df = pd.read_excel(target)
+    if not os.path.exists("Data.xlsx"):
+        return None
+    df = pd.read_excel("Data.xlsx")
     df.columns = df.columns.str.strip()
     return df
 
-# ---------------- AUDIO ANALYSIS ----------------
+# -------------------------------------------------
+def convert_to_wav(audio_bytes):
+    """
+    🔑 ROOT FIX:
+    Convert mic_recorder audio → WAV PCM
+    """
+    audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+    wav_io = io.BytesIO()
+    audio.export(wav_io, format="wav")
+    wav_io.seek(0)
+    return wav_io
+
+# -------------------------------------------------
 def analyze_audio(audio_bytes):
     samples = np.frombuffer(audio_bytes, dtype=np.int16)
     rms = np.sqrt(np.mean(samples.astype(np.float32) ** 2))
     db = 20 * np.log10(rms + 1e-6)
-    return rms, db
+    return db
 
-def signal_meter(db):
+def draw_signal(db):
     fig = go.Figure(go.Bar(
-        x=[db],
-        y=["Signal Level"],
-        orientation='h'
+        x=[db], y=["Signal Level"], orientation="h"
     ))
     fig.update_layout(
         xaxis=dict(range=[-60, 0], title="dB"),
-        height=120,
-        margin=dict(l=50, r=20, t=20, b=20)
+        height=120, margin=dict(l=60, r=20, t=20, b=20)
     )
     return fig
 
-# ---------------- SPEECH TO TEXT ----------------
+# -------------------------------------------------
 def speech_to_text(audio_bytes):
     r = sr.Recognizer()
-    audio = sr.AudioFile(io.BytesIO(audio_bytes))
-    with audio as source:
+
+    wav_audio = convert_to_wav(audio_bytes)
+
+    with sr.AudioFile(wav_audio) as source:
         audio_data = r.record(source)
 
     try:
@@ -81,86 +66,76 @@ def speech_to_text(audio_bytes):
         except:
             return None
 
-# ---------------- TEXT TO SPEECH ----------------
+# -------------------------------------------------
 async def tts(text):
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
     voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
     comm = edge_tts.Communicate(text, voice)
-    data = io.BytesIO()
-    async for c in comm.stream():
-        if c["type"] == "audio":
-            data.write(c["data"])
-    data.seek(0)
-    return data
 
-# ---------------- UI ----------------
+    out = io.BytesIO()
+    async for chunk in comm.stream():
+        if chunk["type"] == "audio":
+            out.write(chunk["data"])
+    out.seek(0)
+    return out
+
+# -------------------------------------------------
 st.title("🎙️ Seshat AI – Voice Assistant Core")
 
 db = load_db()
 
-rec_col, flow_col = st.columns([1, 4])
+col1, col2 = st.columns([1, 4])
 
-with rec_col:
+with col1:
     audio = mic_recorder(
         start_prompt="🎤 Start Asking",
         stop_prompt="🛑 Stop",
-        key="rec"
+        key="assistant"
     )
 
 if audio:
-    st.subheader("🔎 Signal Validation")
+    db_level = analyze_audio(audio["bytes"])
+    st.subheader("🔊 Signal Validation")
+    st.plotly_chart(draw_signal(db_level), use_container_width=True)
 
-    rms, db_level = analyze_audio(audio['bytes'])
-    st.plotly_chart(signal_meter(db_level), use_container_width=True)
-
-    if db_level < -45:
-        st.error("❌ الصوت ضعيف – مفيش Voice Input واضح")
+    if db_level < -44:
+        st.error("❌ الصوت ضعيف – مفيش voice واضح")
         st.stop()
 
-    st.success("✅ Voice Detected – Processing Started")
-
-    with st.status("🧠 Processing...", expanded=True) as status:
-
-        time.sleep(0.5)
+    with st.status("🧠 Processing voice...", expanded=True) as status:
         st.write("🎧 Reading audio...")
-        
-        text = speech_to_text(audio['bytes'])
+        time.sleep(0.5)
+
+        text = speech_to_text(audio["bytes"])
         if not text:
-            st.warning("⚠️ مش فاهم أي كلام واضح في التسجيل")
-            status.update(label="Failed", state="error")
+            status.update(state="error")
+            st.error("❌ مش فاهم الكلام المسجّل")
             st.stop()
 
-        time.sleep(0.5)
-        first_word = text.split()[0]
-
-        st.write(f"✅ First word detected: **{first_word}**")
+        st.write(f"✅ First token: **{text.split()[0]}**")
         time.sleep(0.5)
 
-        st.write("✅ Full question extracted")
+        st.write("✅ Full query extracted")
         st.info(text)
 
         st.session_state.query = text
-        status.update(label="Processing Done", state="complete")
+        status.update(state="complete")
 
-# ---------------- CONFIRM / ENGINE ----------------
+# -------------------------------------------------
 query = st.text_input(
-    "✍️ Confirm or Edit Question:",
+    "✍️ Confirm / Edit Question",
     value=st.session_state.get("query", "")
 )
 
 if query and db is not None:
-    from engine import engine_v17_0   # محركك كما هو
+    from engine import engine_v17_0
 
     res_df, reports, msg, conf, success = engine_v17_0(query, db)
 
     if success:
-        st.subheader("🔊 Assistant Answer")
         st.success(msg)
-
-        voice = asyncio.run(tts(msg))
-        st.audio(voice, format="audio/mp3")
-
-        st.subheader("📊 Data Output")
+        audio_reply = asyncio.run(tts(msg))
+        st.audio(audio_reply, format="audio/mp3")
         st.dataframe(res_df)
     else:
-        st.error("❌ Inquiry not understood fully – some parts skipped")
+        st.warning("⚠️ بعض أجزاء السؤال غير مفهومة وتم تخطيها")
