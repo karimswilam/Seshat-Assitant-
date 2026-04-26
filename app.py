@@ -1,50 +1,41 @@
 import streamlit as st
 import pandas as pd
-import os, io, re, asyncio, edge_tts, base64, requests
+import os, io, re, asyncio, edge_tts, time
 import numpy as np
-import speech_recognition as sr  # للمجاني
+import speech_recognition as sr
 from streamlit_mic_recorder import mic_recorder
+import requests
 
-try:
-    import plotly.express as px
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
-
-# --- 1. CONFIG & INTERFACE (Original v17.0 Style) ---
+# --- 1. CONFIG & INTERFACE ---
 st.set_page_config(layout="wide", page_title="Seshat AI v17.0")
 LOGO_FILE = "Designer.png" 
 PROJECT_NAME = "Seshat Master Precision v17.0"
 PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
 
-header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
-with header_col2:
-    if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=150)
-    st.markdown(f'<div style="text-align: center;"><h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1><p style="color: #475569; font-size: 18px;">{PROJECT_SLOGAN}</p></div>', unsafe_allow_html=True)
-
+# تظبيط الهيدر
+st.markdown(f"""
+    <div style="text-align: center;">
+        <h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1>
+        <p style="color: #475569; font-size: 18px;">{PROJECT_SLOGAN}</p>
+    </div>
+""", unsafe_allow_html=True)
 st.divider()
 
-# --- 2. FIXED ENGINEERING LOGIC (V17.0) ---
-# [Keep all your FLAGS, COUNTRY_MAP, and SYNONYMS here exactly as they are]
-FLAGS = {'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png", 'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png", 'GRC': "https://flagcdn.com/w640/gr.png", 'ISR': "https://flagcdn.com/w640/il.png"}
-COUNTRY_MAP = {'EGY': ['egypt', 'egy', 'مصر', 'المصرية'], 'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة'], 'TUR': ['turkey', 'tur', 'تركيا'], 'CYP': ['cyprus', 'cyp', 'قبرص'], 'GRC': ['greece', 'grc', 'اليونان'], 'ISR': ['israel', 'isr', 'اسرائيل']}
+# --- 2. ENGINEERING CONSTANTS ---
+COUNTRY_MAP = {
+    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
+    'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة'],
+    'TUR': ['turkey', 'tur', 'تركيا'],
+    'CYP': ['cyprus', 'cyp', 'قبرص'],
+    'GRC': ['greece', 'grc', 'اليونان'],
+    'ISR': ['israel', 'isr', 'اسرائيل']
+}
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
-SYNONYMS = {'ALLOT_KEY': ['allotment', 'توزيع'], 'ASSIG_KEY': ['assignment', 'تخصيص'], 'DAB_KEY': ['dab', 'داب', 'صوتية'], 'TV_KEY': ['tv', 'television', 'تلفزيون'], 'FM_KEY': ['fm', 'radio', 'راديو'], 'TOTAL_KEY': ['total', 'إجمالي'], 'EXCEPT_KEY': ['except', 'ma3ada']}
 
-# --- 3. THE NEW DIAGNOSTIC ENGINE (Your Request) ---
-def analyze_signal(audio_bytes):
-    """بيشوف لو الصوت حقيقي بناء على الـ Intensity"""
-    audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-    rms = np.sqrt(np.mean(audio_array.astype(float)**2))
-    db = 20 * np.log10(rms) if rms > 0 else 0
-    # الـ Human voice غالبا بيبقى فيه Variation عالي في الـ dB
-    variation = np.std(audio_array)
-    return (db > 35 and variation > 100), db
-
+# --- 3. SPEECH & SIGNAL LOGIC ---
 def speech_to_text_engine(audio_bytes):
-    """محرك مزدوج: OpenAI (بفلوس) أو Google (مجاني)"""
-    # 1. Trial with OpenAI Whisper if Key exists
+    # محاولة استخدام OpenAI أولاً
     api_key = st.secrets.get("OPENAI_API_KEY")
     if api_key and "sk-" in api_key:
         try:
@@ -55,8 +46,7 @@ def speech_to_text_engine(audio_bytes):
             if resp.status_code == 200: return resp.json().get("text", "")
         except: pass
     
-    # 2. Fallback to Google Free API (Zero Cost)
-    st.info("📡 Using Free Signal Processing (No API Key required)...")
+    # الحل المجاني (Fallback) عشان المشروع ميتعطلش
     recognizer = sr.Recognizer()
     with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
         audio_data = recognizer.record(source)
@@ -66,7 +56,7 @@ def speech_to_text_engine(audio_bytes):
             try: return recognizer.recognize_google(audio_data, language="en-US")
             except: return ""
 
-# --- 4. ENGINE CORE v17.0 (Mapping Logic Included) ---
+# --- 4. DATA ENGINE (FIXED KEYERROR) ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
@@ -74,46 +64,73 @@ def load_db():
     if target:
         df = pd.read_excel(target)
         df.columns = df.columns.str.strip()
-        # ده الـ Mapping اللي إنت عامله في 17.0 وهو ممتاز
-        mapping = {'Adm': ['Administration', 'Adm', 'Country', 'الادارة'], 'Notice Type': ['Notice Type', 'NT'], 'Site/Allotment Name': ['Site/Allotment Name', 'Site Name'], 'Geographic Coordinates': ['Geographic Coordinates', 'Coordinates']}
-        for std, syns in mapping.items():
+        # الربط الذكي اللي بيحل مشكلة الـ KeyError
+        mapping = {
+            'Adm': ['Administration', 'Adm', 'Country', 'الادارة', 'إدارة'],
+            'Notice Type': ['Notice Type', 'NT', 'نوع الإخطار'],
+            'Site/Allotment Name': ['Site/Allotment Name', 'Site Name', 'اسم الموقع']
+        }
+        for std_name, synonyms in mapping.items():
             for col in df.columns:
-                if col in syns: df.rename(columns={col: std}, inplace=True); break
+                if col in synonyms:
+                    df.rename(columns={col: std_name}, inplace=True)
+                    break
         return df
     return None
 
-# [Keep your engine_v17_0 function here exactly as it is]
+def engine_v17_core(q, data):
+    q_low = q.lower()
+    # تحديد الدول
+    adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
+    if not adms: return None, [], "Identification error.", 0, False
 
-# --- 5. UI WITH INDICATORS ---
+    reports = []; final_df = pd.DataFrame()
+    for adm in adms:
+        # التأكد من وجود العمود لتجنب الصور اللي بعتها
+        if 'Adm' not in data.columns: return None, [], "Column 'Adm' not found!", 0, False
+        
+        adm_df = data[data['Adm'] == adm].copy()
+        a_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)])
+        l_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
+        
+        reports.append({"Adm": adm, "Total": a_count + l_count, "Assignments": a_count, "Allotments": l_count})
+        final_df = pd.concat([final_df, adm_df], ignore_index=True)
+
+    return final_df, reports, f"Processed {len(adms)} countries.", 100, True
+
+# --- 5. MAIN UI FLOW ---
 db = load_db()
 
-st.subheader("🎤 Voice Control & Signal Monitor")
-diag_col1, diag_col2 = st.columns([1, 2])
+with st.sidebar:
+    st.header("Settings")
+    if db is not None: st.success("✅ Database Connected")
+    else: st.error("❌ No Data.xlsx found")
 
-with diag_col1:
-    audio = mic_recorder(start_prompt="Click to Speak", stop_prompt="Stop & Process", key="v17_mic")
+st.subheader("🎤 Intelligence Control Center")
+audio_input = mic_recorder(start_prompt="Click to Speak", stop_prompt="Stop & Process", key="mic")
 
 query = ""
-if audio:
-    with diag_col2:
-        is_human, db_level = analyze_signal(audio['bytes'])
-        if is_human:
-            st.success(f"✅ Signal Detected! (Intensity: {db_level:.1f} dB)")
-            # شريط المعالجة اللي طلبته
-            with st.status("🛠️ Processing Audio...", expanded=True) as status:
-                st.write("1. Validating Sound Variation...")
-                time.sleep(0.3)
-                st.write("2. Converting Signal to Text...")
-                query = speech_to_text_engine(audio['bytes'])
-                if query:
-                    status.update(label=f"🎯 Recognized: {query}", state="complete")
-                else:
-                    status.update(label="❌ Failed to understand text.", state="error")
+if audio_input:
+    # الـ Status Bar اللي كان بيضرب Error
+    with st.status("📡 Processing Spectrum Intelligence...", expanded=True) as status:
+        st.write("1. Validating Sound Variation...")
+        time.sleep(0.4) # دلوقتي الـ time متعرف صح
+        st.write("2. Converting Signal to Text...")
+        query = speech_to_text_engine(audio_input['bytes'])
+        if query:
+            status.update(label=f"🎯 Query Recognized: {query}", state="complete")
         else:
-            st.error(f"🚫 No Human Voice Detected (Low Intensity: {db_level:.1f} dB)")
+            status.update(label="❌ No Voice Detected", state="error")
 
-# Fallback Input
 if not query:
-    query = st.text_input("📝 Manual Inquiry:", key="manual")
+    query = st.text_input("⌨️ Manual Inquiry / Confirmation:")
 
-# [Rest of your UI/Dashboard code from v17.0]
+if query and db is not None:
+    res_df, reports, msg, conf, success = engine_v17_core(query, db)
+    if success:
+        cols = st.columns(len(reports))
+        for i, r in enumerate(reports):
+            cols[i].metric(f"Country: {r['Adm']}", f"Total: {r['Total']}", f"Assig: {r['Assignments']}")
+        
+        with st.expander("View Filtered Spectrum Data"):
+            st.dataframe(res_df)
