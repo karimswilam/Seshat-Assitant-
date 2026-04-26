@@ -1,13 +1,12 @@
 streamlit>=1.32.0
+
 pandas>=2.2.0
 numpy>=1.26.0
 openpyxl>=3.1.2
 
 speechrecognition>=3.10.0
-pydub>=0.25.1
-
 streamlit-mic-recorder>=0.0.8
-edge-tts>=6.1.10
 
-rapidfuzz>=3.6.0
+edge-tts>=6.1.10
 plotly>=5.20.0
+``
