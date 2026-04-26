@@ -89,4 +89,3 @@ manual_query = st.text_input("📝 Confirm/Override Query:", value=st.session_st
 if manual_query and db is not None:
     # هتاخد الـ Manual Query وتمررها لـ engine_v17_core اللي عندك
     st.info(f"Analyzing: {manual_query}")
-    # ... (باقي كود الـ Engine والـ Dashboard)
