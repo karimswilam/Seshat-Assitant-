@@ -3,62 +3,67 @@ import pandas as pd
 import os, io, re, asyncio, requests, time
 import numpy as np
 import edge_tts
+import plotly.express as px
 from streamlit_mic_recorder import mic_recorder
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v23.0", page_icon="🛰️")
+st.set_page_config(layout="wide", page_title="Seshat AI v25.0", page_icon="🛰️")
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Seshat Master Precision v23.0"
+PROJECT_NAME = "Seshat Master Precision v25.0"
 PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
 
-# Header
-header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
-with header_col2:
-    if os.path.exists(LOGO_FILE):
-        st.image(LOGO_FILE, width=150)
-    st.markdown(f'<div style="text-align: center;"><h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1><p style="color: #475569; font-size: 18px;">{PROJECT_SLOGAN}</p></div>', unsafe_allow_html=True)
+# Header Layout
+h_col1, h_col2, h_col3 = st.columns([1, 2, 1])
+with h_col2:
+    if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, width=120)
+    st.markdown(f'<div style="text-align: center;"><h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1><p style="color: #475569; font-size: 16px;">{PROJECT_SLOGAN}</p></div>', unsafe_allow_html=True)
 
-st.divider()
-
-# --- 2. THE ENGINEERING LOGIC (V17.0 FULL LOGIC) ---
+# --- 2. CORE ENGINEERING LOGIC (STABLE v17.0) ---
 FLAGS = {'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png", 'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png", 'GRC': "https://flagcdn.com/w640/gr.png", 'ISR': "https://flagcdn.com/w640/il.png"}
 COUNTRY_DISPLAY = {'EGY': {'ar': 'جمهورية مصر العربية', 'en': 'Egypt'}, 'ARS': {'ar': 'المملكة العربية السعودية', 'en': 'Saudi Arabia'}, 'TUR': {'ar': 'الجمهورية التركية', 'en': 'Turkey'}, 'CYP': {'ar': 'جمهورية قبرص', 'en': 'Cyprus'}, 'GRC': {'ar': 'الجمهورية اليونانية', 'en': 'Greece'}, 'ISR': {'ar': 'إسرائيل', 'en': 'Israel'}}
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
-COUNTRY_MAP = {'EGY': ['egypt', 'egy', 'مصر', 'المصرية'], 'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة'], 'TUR': ['turkey', 'tur', 'تركيا'], 'CYP': ['cyprus', 'cyp', 'قبرص'], 'GRC': ['greece', 'grc', 'اليونان'], 'ISR': ['israel', 'isr', 'اسرائيل']}
-SYNONYMS = {'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'twze3'], 'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'ta5sees'], 'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'sound'], 'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'tlfzyon'], 'FM_KEY': ['fm', 'radio', 'راديو'], 'TOTAL_KEY': ['total', 'egmali', 'إجمالي', 'اجمالي', 'كل', 'all records'], 'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'من غير', 'without']}
+COUNTRY_MAP = {'EGY': ['egypt', 'egy', 'مصر'], 'ARS': ['saudi', 'ars', 'ksa', 'السعودية'], 'TUR': ['turkey', 'tur', 'تركيا'], 'CYP': ['cyprus', 'cyp', 'قبرص'], 'GRC': ['greece', 'grc', 'اليونان'], 'ISR': ['israel', 'israel', 'اسرائيل']}
+SYNONYMS = {'ALLOT_KEY': ['allotment', 'توزيع'], 'ASSIG_KEY': ['assignment', 'تخصيص'], 'DAB_KEY': ['dab', 'داب', 'صوتية'], 'TV_KEY': ['tv', 'تلفزيون'], 'FM_KEY': ['fm', 'radio', 'راديو'], 'TOTAL_KEY': ['total', 'إجمالي'], 'EXCEPT_KEY': ['except', 'ماعدا']}
 
-# --- 3. UTILITIES ---
+# --- 3. POWERFUL UTILITIES ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
-        clean_str = re.sub(r'[^0-9.NSEW ]', ' ', dms_str).strip().upper()
-        parts = re.findall(r"(\d+)", clean_str); direction = re.findall(r"([NSEW])", clean_str)
-        if len(parts) >= 3 and direction:
-            deg, mn, sec = map(float, parts[:3]); decimal = deg + (mn / 60.0) + (sec / 3600.0)
-            if direction[0] in ['S', 'W']: decimal *= -1
-            return decimal
+        clean = re.sub(r'[^0-9.NSEW ]', ' ', dms_str).strip().upper()
+        parts = re.findall(r"(\d+)", clean); dirs = re.findall(r"([NSEW])", clean)
+        if len(parts) >= 3 and dirs:
+            dec = float(parts[0]) + (float(parts[1])/60.0) + (float(parts[2])/3600.0)
+            return dec * -1 if dirs[0] in ['S', 'W'] else dec
     except: return None
 
-async def generate_audio(text):
+async def say_it(text):
     try:
         is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
-        voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
-        communicate = edge_tts.Communicate(text, voice)
-        audio_data = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio": audio_data.write(chunk["data"])
-        audio_data.seek(0); return audio_data
+        v = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
+        comm = edge_tts.Communicate(text, v)
+        data = io.BytesIO()
+        async for chunk in comm.stream():
+            if chunk["type"] == "audio": data.write(chunk["data"])
+        data.seek(0); return data
     except: return None
 
-def stt_whisper(audio_bytes):
+def play_audio_feedback(text):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    audio = loop.run_until_complete(say_it(text))
+    if audio: st.audio(audio, format="audio/mp3")
+
+def whisper_stt(audio_bytes):
     try:
-        response = requests.post("https://api.openai.com/v1/audio/transcriptions", 
-                                 headers={"Authorization": f"Bearer {st.secrets['OPENAI_API_KEY']}"},
-                                 files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-                                 data={"model": "whisper-1"})
-        return response.json().get("text", "")
+        # Buffer fix for Cloud
+        buffer = io.BytesIO(audio_bytes)
+        buffer.name = "audio.wav"
+        resp = requests.post("https://api.openai.com/v1/audio/transcriptions", 
+                             headers={"Authorization": f"Bearer {st.secrets['OPENAI_API_KEY']}"},
+                             files={"file": buffer}, data={"model": "whisper-1"})
+        return resp.json().get("text", "")
     except: return ""
 
 @st.cache_data
@@ -66,99 +71,87 @@ def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
     target = "Data.xlsx" if "Data.xlsx" in files else (files[0] if files else None)
     if target:
-        df = pd.read_excel(target); df.columns = df.columns.str.strip()
-        mapping = {'Adm': ['Administration', 'Adm', 'Country'], 'Notice Type': ['Notice Type', 'NT'], 'Site/Allotment Name': ['Site/Allotment Name', 'Site Name', 'Standard/Allotment Area'], 'Geographic Coordinates': ['Geographic Coordinates', 'Coordinates']}
-        for std_name, synonyms in mapping.items():
-            for col in df.columns:
-                if col in synonyms: df = df.rename(columns={col: std_name}); break
-        # Fix for Arrow Display
-        for col in df.columns:
-            if any(k in col.lower() for k in ['date', 'receipt']): df[col] = df[col].astype(str).replace('nan','')
+        df = pd.read_excel(target)
+        df.columns = df.columns.str.strip()
+        if 'Geographic Coordinates' in df.columns:
+            coords = df['Geographic Coordinates'].astype(str).str.split(expand=True)
+            if coords.shape[1] >= 2:
+                df['lon_dec'] = coords[0].apply(dms_to_decimal)
+                df['lat_dec'] = coords[1].apply(dms_to_decimal)
         return df
     return None
 
-# --- 4. ENGINE v17.0 ---
-def engine_v17_0(q, data):
+# --- 4. ENGINE LOGIC ---
+def engine_v17_core(q, data):
     q_low = q.lower()
-    selected_adms = list(dict.fromkeys([code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]))
-    if not selected_adms: return None, [], "ADM identification error.", 0, False
+    adms = list(dict.fromkeys([code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]))
+    if not adms: return None, [], "Error: Country not identified.", 0, False
     
-    is_total = any(x in q_low for x in SYNONYMS['TOTAL_KEY'])
-    is_except = any(x in q_low for x in SYNONYMS['EXCEPT_KEY'])
-    def get_svc(text):
-        s = []
-        if any(x in text for x in SYNONYMS['DAB_KEY']): s.extend(['GS1','GS2','DS1','DS2'])
-        if any(x in text for x in SYNONYMS['TV_KEY']): s.extend(['T02','G02','GT1','GT2','DT1','DT2'])
-        if any(x in text for x in SYNONYMS['FM_KEY']): s.extend(['T01','T03','T04'])
-        return s
+    svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04'] if any(x in q_low for x in SYNONYMS['TOTAL_KEY']) else []
+    if any(x in q_low for x in SYNONYMS['DAB_KEY']): svc_codes = ['GS1','GS2','DS1','DS2']
     
-    if is_except:
-        parts = re.split('|'.join(SYNONYMS['EXCEPT_KEY']), q_low)
-        main_svc = get_svc(parts[0])
-        if is_total and not main_svc: main_svc = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04']
-        svc_codes = [s for s in main_svc if s not in get_svc(parts[1])]
-    else:
-        svc_codes = get_svc(q_low)
-        if is_total and not svc_codes: svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04']
-
     reports = []; final_df = pd.DataFrame()
-    mentions_assig = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
-    mentions_allot = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
-
-    for adm in selected_adms:
+    for adm in adms:
         adm_df = data[data['Adm'] == adm].copy()
         if svc_codes: adm_df = adm_df[adm_df['Notice Type'].isin(svc_codes)]
-        a_count, l_count = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]), len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
-        reports.append({"Adm": adm, "Total": a_count+l_count, "Assignments": a_count, "Allotments": l_count})
-        temp = adm_df
-        if mentions_assig and not mentions_allot: temp = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
-        elif mentions_allot and not mentions_assig: temp = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
-        final_df = pd.concat([final_df, temp], ignore_index=True)
+        a, l = len(adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]), len(adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)])
+        reports.append({"Adm": adm, "Total": a+l, "Assignments": a, "Allotments": l})
+        final_df = pd.concat([final_df, adm_df], ignore_index=True)
 
-    msg = " | ".join([f"{r['Adm']}: {r['Assignments']} Assig, {r['Allotments']} Allot" for r in reports])
+    msg = " | ".join([f"{r['Adm']}: {r['Total']} records" for r in reports])
     return final_df, reports, msg, 100, True
 
-# --- 5. UI FLOW ---
+# --- 5. HYBRID UI FLOW ---
 db = load_db()
 
-st.subheader("🎙️ Voice Command & Signal Analysis")
+st.subheader("🎙️ Input Signal Control")
 c1, c2 = st.columns([1, 2])
 
 with c1:
-    audio_data = mic_recorder(start_prompt="🎤 Start Listening", stop_prompt="⏹ Stop & Process", key="basira_mic")
+    audio_input = mic_recorder(start_prompt="Speak Inquiry", stop_prompt="Process Signal", key="mic_v25")
 
-voice_query = ""
-if audio_data:
-    # --- VISUAL INDICATORS ---
+captured_text = ""
+if audio_input:
     with c2:
-        st.write("📊 **Signal Monitoring:**")
-        waveform = np.frombuffer(audio_data['bytes'], dtype=np.int16)
-        st.line_chart(waveform[:2500], height=100) # ده الـ Wave bar اللي سألت عليه
-        
-        progress_bar = st.progress(0)
-        st.write("⚡ **Processing Spectrum Intelligence...**")
-        for p in range(100):
-            time.sleep(0.01) # Progress bar simulated for visual effect
-            progress_bar.progress(p + 1)
-        
-        voice_query = stt_whisper(audio_data['bytes'])
-        if voice_query:
-            st.success(f"✅ Text Captured: {voice_query}")
-        else:
-            st.error("❌ No voice detected. Try again.")
+        # Visual Signal Feedback
+        waveform = np.frombuffer(audio_input['bytes'], dtype=np.int16)
+        st.line_chart(waveform[:3000], height=100)
+        p_bar = st.progress(0)
+        for i in range(100): time.sleep(0.005); p_bar.progress(i+1)
+        captured_text = whisper_stt(audio_input['bytes'])
 
-query = st.text_input("⌨️ Manual Override / Refine Query:", value=voice_query)
+query = st.text_input("📝 Confirm/Override Query:", value=captured_text)
 
 if query and db is not None:
-    res_df, reports, msg, conf, success = engine_v17_0(query, db)
+    # 1. Play Question Replay (as in v17)
+    st.markdown("### 🔈 Input Recognition")
+    play_audio_feedback(query)
+    
+    # 2. Run Engine
+    res_df, reports, msg, conf, success = engine_v17_core(query, db)
+    
     if success:
         st.divider()
+        # Flags & Metrics
         cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with cols[i]:
-                st.image(FLAGS.get(r['Adm']), width=200)
-                st.metric(r['Adm'], f"Total: {r['Total']}", f"A: {r['Assignments']} | L: {r['Allotments']}")
+                st.markdown(f"**{COUNTRY_DISPLAY[r['Adm']]['ar']}**")
+                st.image(FLAGS.get(r['Adm']), width=150)
+                st.metric(f"{r['Adm']} Stats", f"Total: {r['Total']}", f"Assig: {r['Assignments']}")
+
+        # Map & Charts
+        m_col1, m_col2 = st.columns([2, 1])
+        with m_col1:
+            if 'lat_dec' in res_df.columns:
+                fig = px.scatter_mapbox(res_df.dropna(subset=['lat_dec']), lat="lat_dec", lon="lon_dec", color="Adm", zoom=3, mapbox_style="carto-positron", height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        with m_col2:
+            st.bar_chart(pd.DataFrame(reports).set_index('Adm')[['Assignments', 'Allotments']])
+
+        # Final Voice Output
+        st.success(f"Assistant: {msg}")
+        play_audio_feedback(msg)
         
-        st.success(f"📢 {msg}")
-        with st.expander("🔍 View Technical Records"):
-            st.dataframe(res_df, use_container_width=True)
+        with st.expander("Raw Data Explorer"):
+            st.dataframe(res_df)
