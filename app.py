@@ -55,14 +55,22 @@ def play_audio(text):
     except:
         pass
 
-# ================= STT =================
-def speech_to_text(audio_bytes):
+# ================= ✅ FIXED STT =================
+def speech_to_text_from_mic(mic_data):
+    """
+    mic_data comes directly from streamlit-mic-recorder
+    """
     try:
-        r = sr.Recognizer()
-        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
-            audio = r.record(source)
-        return r.recognize_google(audio)
-    except:
+        audio_bytes = mic_data["bytes"]
+        sample_rate = mic_data.get("sample_rate", 16000)
+        sample_width = 2  # 16-bit PCM
+
+        audio = sr.AudioData(audio_bytes, sample_rate, sample_width)
+        recognizer = sr.Recognizer()
+
+        return recognizer.recognize_google(audio)
+    except Exception as e:
+        st.error(f"STT Error: {e}")
         return None
 
 # ================= ENGINE =================
@@ -86,7 +94,6 @@ def engine(query, data):
 # ================= UI =================
 query = st.text_input("🔤 Ask by text")
 
-# ---- Indicators placeholders ----
 status_box = st.empty()
 progress_bar = st.progress(0)
 
@@ -106,8 +113,8 @@ if voice and "bytes" in voice:
     audio_size_kb = len(voice["bytes"]) / 1024
     st.caption(f"🔊 Audio captured: {audio_size_kb:.1f} KB")
 
-    text = speech_to_text(voice["bytes"])
-    progress_bar.progress(70)
+    text = speech_to_text_from_mic(voice)
+    progress_bar.progress(80)
 
     if text:
         status_box.success("✅ Voice recognized")
