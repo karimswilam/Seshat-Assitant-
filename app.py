@@ -1,173 +1,67 @@
-# ================= IMPORTS =================# ================= IMPORTS = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
-
-    reports = []
-    final_df = pd.DataFrame()
-
-    for adm in selected_adms:
-        adm_df = data[data['Adm'] == adm]
-
-        a = adm_df[adm_df['Notice Type'].isin(STRICT_ASSIG)]
-        l = adm_df[adm_df['Notice Type'].isin(STRICT_ALLOT)]
-
-        reports.append({
-            "Adm": adm,
-            "Assignments": len(a),
-            "Allotments": len(l),
-            "Total": len(a) + len(l)
-        })
-
-        final_df = pd.concat([final_df, adm_df])
-
-    msg = " | ".join(
-        [f"{r['Adm']} → A={r['Assignments']} | L={r['Allotments']} | T={r['Total']}" for r in reports]
-    )
-
-    return final_df, reports, msg, 100, True
-
-
-# ================= UI FLOW =================
-db = load_db()
-
-query = st.text_input(
-    "🎙️ Enter Spectrum Inquiry (Text)",
-    key="main_q"
-)
-
-# ✅ ADDITION: LIVE VOICE INPUT (NO REMOVAL OF TEXT INPUT)
-st.markdown("### 🎤 Or ask by voice")
-voice_audio = mic_recorder(
-    start_prompt="▶️ Start Recording",
-    stop_prompt="⏹️ Stop Recording",
-    key="voice_q"
-)
-
-if voice_audio and "bytes" in voice_audio:
-    voice_text = speech_to_text_from_mic(voice_audio["bytes"])
-    if voice_text:
-        st.success(f"You said: {voice_text}")
-        query = voice_text
-    else:
-        st.error("❌ Voice not understood")
-
-if query and db is not None:
-    play_audio(query)
-    st.divider()
-
-    res_df, reports, msg, conf, success = engine_v17_0(query, db)
-
-    if success:
-        cols = st.columns(len(reports))
-        for i, r in enumerate(reports):
-            with cols[i]:
-                st.image(FLAGS.get(r['Adm']), width=200)
-                st.metric(
-                    r['Adm'],
-                    r['Total'],
-                    f"A={r['Assignments']} | L={r['Allotments']}"
-                )
-
-        st.success(msg)
-        play_audio(msg)
-
-        if PLOTLY_AVAILABLE:
-            chart_df = pd.DataFrame(reports).set_index("Adm")
-            st.bar_chart(chart_df[['Assignments', 'Allotments']])
-
-        with st.expander("📊 Technical Records"):
-            st.dataframe(res_df)
 import streamlit as st
 import pandas as pd
 import os
 import io
-import re
+import Ask by text")import re
+
+st.markdown("### 🎤 Or ask by voice")
+voice = mic_recorder(start_prompt="▶ Start", stop_prompt="⏹ Stop", key="mic")
+
+if voice and "bytes" in voice:
+    text = speech_to_text(voice["bytes"])
+    if text:
+        st.success(f"You said: {text}")
+        query = text
+
+if query and db is not None:
+    play_audio(query)
+    result = engine(query, db)
+    st.success(result)
+    play_audio(result)
+``
 import asyncio
+
 import edge_tts
-import base64
-from rapidfuzz import process, fuzz
+from streamlit_mic_recorder import mic_recorder
+import speech_recognition as sr
 
-from streamlit_mic_recorder import mic_recorder   # ✅ ADDITION (VOICE INPUT)
-import speech_recognition as sr                  # ✅ ADDITION (VOICE INPUT)
-
-try:
-    import plotly.express as px
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
-
-
-# ================= CONFIG & INTERFACE =================
+# ================= CONFIG =================
 st.set_page_config(layout="wide", page_title="Seshat AI v17.0")
 
-LOGO_FILE = "Designer.png"
-PROJECT_NAME = "Seshat Master Precision v17.0"
-PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
+st.title("Seshat AI v17.0 – Voice Prototype")
 
-header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
-with header_col2:
-    if os.path.exists(LOGO_FILE):
-        st.image(LOGO_FILE, width=150)
-    st.markdown(
-        f'<div style="text-align: center;">'
-        f'<h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1>'
-        f'<p style="color: #475569; font-size: 18px;">{PROJECT_SLOGAN}</p>'
-        f'</div>',
-        unsafe_allow_html=True
-    )
-
-st.divider()
-
-
-# ================= FIXED ENGINEERING LOGIC =================
-FLAGS = {
-    'EGY': "https://flagcdn.com/w640/eg.png",
-    'ARS': "https://flagcdn.com/w640/sa.png",
-    'TUR': "https://flagcdn.com/w640/tr.png",
-    'CYP': "https://flagcdn.com/w640/cy.png",
-    'GRC': "https://flagcdn.com/w640/gr.png",
-    'ISR': "https://flagcdn.com/w640/il.png"
-}
-
-COUNTRY_DISPLAY = {
-    'EGY': {'ar': 'جمهورية مصر العربية', 'en': 'Egypt'},
-    'ARS': {'ar': 'المملكة العربية السعودية', 'en': 'Saudi Arabia'},
-    'TUR': {'ar': 'الجمهورية التركية', 'en': 'Turkey'},
-    'CYP': {'ar': 'جمهورية قبرص', 'en': 'Cyprus'},
-    'GRC': {'ar': 'الجمهورية اليونانية', 'en': 'Greece'},
-    'ISR': {'ar': 'إسرائيل', 'en': 'Israel'}
-}
-
+# ================= CONSTANTS =================
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
 
 COUNTRY_MAP = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية'],
-    'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة'],
+    'EGY': ['egypt', 'egy', 'مصر'],
     'TUR': ['turkey', 'tur', 'تركيا'],
-    'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'GRC': ['greece', 'grc', 'اليونان'],
     'ISR': ['israel', 'isr', 'اسرائيل']
 }
 
-SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات'],
-    'TOTAL_KEY': ['total', 'egmali', 'إجمالي', 'اجمالي', 'كل'],
-}
+# ================= DATA =================
+@st.cache_data
+def load_db():
+    if not os.path.exists("Data.xlsx"):
+        st.error("❌ Data.xlsx not found")
+        return None
+    df = pd.read_excel("Data.xlsx")
+    df.columns = df.columns.str.strip()
+    return df
 
+db = load_db()
 
-# ================= VOICE OUTPUT (TTS – ORIGINAL) =================
+# ================= TTS =================
 async def generate_audio(text):
-    is_ar = any(c in 'ابتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
-    voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
-    clean_text = re.sub(r'<[^>]*>', '', text)
-    communicate = edge_tts.Communicate(clean_text, voice, rate="-10%")
-
-    audio_data = io.BytesIO()
+    voice = "ar-EG-ShakirNeural" if re.search(r"[ء-ي]", text) else "en-US-AndrewNeural"
+    communicate = edge_tts.Communicate(text, voice)
+    audio = io.BytesIO()
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
-            audio_data.write(chunk["data"])
-    audio_data.seek(0)
-    return audio_data
+            audio.write(chunk["data"])
+    audio.seek(0)
+    return audio
 
 def play_audio(text):
     try:
@@ -178,9 +72,8 @@ def play_audio(text):
     except:
         pass
 
-
-# ================= ✅ ADDITION: VOICE INPUT (STT) =================
-def speech_to_text_from_mic(audio_bytes):
+# ================= STT =================
+def speech_to_text(audio_bytes):
     try:
         r = sr.Recognizer()
         with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
@@ -189,24 +82,22 @@ def speech_to_text_from_mic(audio_bytes):
     except:
         return None
 
+# ================= ENGINE =================
+def engine(query, data):
+    q = query.lower()
+    reports = []
 
-# ================= DATA LOADER (UNCHANGED, Data.xlsx) =================
-@st.cache_data
-def load_db():
-    if not os.path.exists("Data.xlsx"):
-        st.error("❌ Data.xlsx not found")
-        return None
-    df = pd.read_excel("Data.xlsx")
-    df.columns = df.columns.str.strip()
-    return df
+    for adm, keys in COUNTRY_MAP.items():
+        if any(k in q for k in keys):
+            df_adm = data[data["Administration"] == adm]
+            a = len(df_adm[df_adm["Notice Type"].isin(STRICT_ASSIG)])
+            l = len(df_adm[df_adm["Notice Type"].isin(STRICT_ALLOT)])
+            reports.append((adm, a, l))
 
+    if not reports:
+        return "No country identified."
 
-# ================= ENGINE CORE v17.0 (UNCHANGED) =================
-def engine_v17_0(q, data):
-    q_low = q.lower()
+    msg = " | ".join([f"{r[0]}: A={r[1]} L={r[2]}" for r in reports])
+    return msg
 
-    selected_adms = [c for c, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
-    if not selected_adms:
-        return None, [], "ADM identification error.", 0, False
-
-    mentions_a = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
+# ================= UI =================
