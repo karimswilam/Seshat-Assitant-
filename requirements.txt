@@ -7,3 +7,5 @@ plotly
 requests
 streamlit-mic-recorder
 SpeechRecognition
+pydub
+numpy
