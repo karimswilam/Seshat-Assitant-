@@ -1,10 +1,7 @@
 streamlit
 pandas
-openpyxl
-edge-tts
-rapidfuzz
-plotly
-requests
-streamlit-mic-recorder
 numpy
+matplotlib
 SpeechRecognition
+pyaudio
+openpyxl
