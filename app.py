@@ -56,21 +56,21 @@ STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
 STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
 
 COUNTRY_MAP = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية', 'المصريه', 'مصرية', 'مصريه'],
+    'EGY': ['egypt', 'egy', 'مصر', 'المصرية', 'المصريه', 'مصرية', 'مصريه', 'قصر', 'متر'], # قصر ومتر أخطاء شائعة لـ مصر
     'ARS': ['saudi', 'saudiarabia', 'ars', 'ksa', 'السعودية', 'المملكة', 'المملكه', 'سعودية', 'سعوديه', 'السعوديه'],
     'TUR': ['turkey', 'tur', 'تركيا', 'تركي', 'التركية', 'التركيه', 'turkish'],
     'CYP': ['cyprus', 'cyp', 'قبرص', 'قبرصية', 'قبرصيه'],
     'GRC': ['greece', 'grc', 'اليونان', 'يوناني', 'اليونانية', 'اليونانيه'],
-    'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل']
+    'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل', 'زومبايل', 'عزرائيل'] # إضافة بدائل صوتية
 }
 
 SYNONYMS = {
     'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'allot'],
     'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'assig'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'digital audio', 'إذاعي', 'اذاعي'],
+    'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'digital audio', 'إذاعي', 'اذاعي', 'دياب', 'دب', 'باب', 'That'], # إضافة بدائل DAB
     'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'مرئيه', 'video'],
     'FM_KEY': ['fm', 'radio', 'راديو'],
-    'TOTAL_KEY': ['total', 'egmali', 'إجمالي', 'اجمالي', 'كل', 'all', 'statistics', 'إحصائية', 'احصائية', 'احصائيه'],
+    'TOTAL_KEY': ['total', 'egmali', 'إجمالي', 'اجمالي', 'كل', 'all', 'statistics', 'إحصائية', 'احصائية', 'احصائيه', 'عدد'],
     'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'without', 'excluding']
 }
 
@@ -89,6 +89,34 @@ def dms_to_decimal(dms_str):
     except: return None
     return None
 
+def apply_phonetic_correction(text):
+    """دالة تصحيح الكلمات المتشابهة صوتياً لتدريب الموديل يدوياً"""
+    if not text: return text
+    
+    corrections = {
+        # Arabic Corrections
+        r'\bدياب\b': 'داب',
+        r'\bدب\b': 'داب',
+        r'\bباب\b': 'داب',
+        r'\bناصيف\b': 'مصر',
+        r'\bناصر\b': 'مصر',
+        r'\bمتر\b': 'مصر',
+        r'\bزومبايل\b': 'إسرائيل',
+        r'\bعزرائيل\b': 'إسرائيل',
+        r'\bكم محطة\b': 'كم سجل',
+        # English Corrections
+        r'\bThat\b': 'DAB',
+        r'\bthe app\b': 'DAB',
+        r'\bDad\b': 'DAB',
+        r'\bIs real\b': 'Israel'
+    }
+    
+    corrected_text = text
+    for pattern, replacement in corrections.items():
+        corrected_text = re.sub(pattern, replacement, corrected_text, flags=re.IGNORECASE)
+    
+    return corrected_text
+
 def speech_to_text_robust(audio_data):
     if audio_data is None: return None
     r = sr.Recognizer()
@@ -102,14 +130,16 @@ def speech_to_text_robust(audio_data):
             r.adjust_for_ambient_noise(source, duration=0.3)
             audio = r.record(source)
         
-        # محاولة التعرف باللغتين (Detection)
         try:
-            # نحاول أولاً بالعربي، ولو مفيش نتيجة واضحة أو النص يبدو إنجليزي نحول
-            text = r.recognize_google(audio, language="ar-EG")
-            # لو النص فاضي أو ملوش معنى، جرب إنجليزي
-            return text
+            # محاولة التعرف بالعربي أولاً
+            raw_text = r.recognize_google(audio, language="ar-EG")
         except:
-            return r.recognize_google(audio, language="en-US")
+            # المحاولة بالإنجليزي
+            raw_text = r.recognize_google(audio, language="en-US")
+        
+        # تطبيق التصحيح الصوتي قبل الإرجاع
+        return apply_phonetic_correction(raw_text)
+        
     except Exception as e:
         st.error(f"Signal Processing Error: {e}")
         return None
@@ -188,15 +218,14 @@ def engine_v17_5(q, data):
         if any(x in q_low for x in SYNONYMS['ASSIG_KEY']): excluded_codes.extend(STRICT_ASSIG)
         if any(x in q_low for x in SYNONYMS['ALLOT_KEY']): excluded_codes.extend(STRICT_ALLOT)
 
-    # تحديد المطلوب (Default is ALL if not specified)
+    # تحديد المطلوب
     if any(x in q_low for x in SYNONYMS['DAB_KEY']) and not excluded_codes: wanted_codes.extend(categories['DAB'])
     if any(x in q_low for x in SYNONYMS['TV_KEY']) and not excluded_codes: wanted_codes.extend(categories['TV'])
     if any(x in q_low for x in SYNONYMS['FM_KEY']) and not excluded_codes: wanted_codes.extend(categories['FM'])
     
-    if not wanted_codes: # لو محددش خدمة أو طلب إحصائية شاملة
+    if not wanted_codes: 
         wanted_codes = categories['DAB'] + categories['TV'] + categories['FM'] + ['G01']
     
-    # استبعاد الكودات المرفوضة من القائمة المطلوبة
     svc_codes = [c for c in wanted_codes if c not in excluded_codes]
 
     # 3. تجميع التقارير
@@ -226,9 +255,11 @@ def engine_v17_5(q, data):
         else:
             msg = f"{comp_type} Ranking: {sorted_reports[0]['DisplayName']} is first with {sorted_reports[0][comp_type]}. "
             msg += "Followed by " + ", ".join([f"{r['DisplayName']} ({r[comp_type]})" for r in sorted_reports[1:]])
-    else:
+    elif reports:
         r = reports[0]
         msg = f"{r['DisplayName']}: {r[comp_type]} {comp_type} records found." if not is_ar else f"{r['DisplayName']}: تم العثور على {r[comp_type]} سجل ({comp_type})."
+    else:
+        msg = "No data found."
 
     return final_df, reports, msg, 100, True
 
@@ -264,7 +295,7 @@ if query and db is not None:
         col_left, col_right = st.columns(2)
         chart_data = pd.DataFrame(reports)
         with col_left:
-            if PLOTLY_AVAILABLE:
+            if PLOTLY_AVAILABLE and not chart_data.empty:
                 fig = px.bar(chart_data, x="DisplayName", y=["Assignments", "Allotments"], barmode="group", title="Data Distribution")
                 st.plotly_chart(fig, use_container_width=True)
         with col_right:
