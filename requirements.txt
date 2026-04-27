@@ -9,3 +9,4 @@ streamlit-mic-recorder
 SpeechRecognition
 pydub
 numpy
+nest-asyncio
