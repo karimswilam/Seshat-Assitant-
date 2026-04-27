@@ -9,7 +9,11 @@ import base64
 import numpy as np
 from streamlit_mic_recorder import mic_recorder
 import speech_recognition as sr
-from pydub import AudioSegment  # المكتبة الجديدة للتحويل
+from pydub import AudioSegment  # مكتبة معالجة الصوت
+import nest_asyncio # حل مشكلة تداخل الـ loops في Streamlit
+
+# تفعيل nest_asyncio للسماح بتشغيل الـ Audio Engine بسلاسة
+nest_asyncio.apply()
 
 try:
     import plotly.express as px
@@ -70,7 +74,7 @@ SYNONYMS = {
     'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون']
 }
 
-# --- 3. UTILITIES & VOICE ENGINE (FINAL ROBUST VERSION) ---
+# --- 3. UTILITIES & VOICE ENGINE ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
@@ -92,13 +96,14 @@ def speech_to_text_robust(audio_data):
         # 1. تحويل الـ Bytes لملف WebM في الذاكرة
         webm_audio = io.BytesIO(audio_data['bytes'])
         
-        # 2. التحويل السحري من WebM لـ WAV باستخدام pydub لحل مشكلة الـ Headers
+        # 2. التحويل من WebM لـ WAV باستخدام pydub لضمان قراءة الـ Headers
+        # ffmpeg must be installed via packages.txt
         audio_segment = AudioSegment.from_file(webm_audio, format="webm")
         wav_io = io.BytesIO()
         audio_segment.export(wav_io, format="wav")
         wav_io.seek(0)
         
-        # 3. إرسال الإشارة للمحرك بعد التنسيق
+        # 3. معالجة الصوت وتحويله لنص
         with sr.AudioFile(wav_io) as source:
             st.toast("🔊 Signal Normalized...", icon="✅")
             r.adjust_for_ambient_noise(source, duration=0.2)
@@ -124,8 +129,8 @@ async def generate_audio(text):
 
 def play_audio(text):
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # استخدام loop الحالي بفضل nest_asyncio
+        loop = asyncio.get_event_loop()
         data = loop.run_until_complete(generate_audio(text))
         if data: st.audio(data, format="audio/mp3")
     except: pass
