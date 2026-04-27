@@ -9,6 +9,7 @@ import base64
 import numpy as np
 from streamlit_mic_recorder import mic_recorder
 import speech_recognition as sr
+from pydub import AudioSegment  # المكتبة الجديدة للتحويل
 
 try:
     import plotly.express as px
@@ -69,7 +70,7 @@ SYNONYMS = {
     'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون']
 }
 
-# --- 3. UTILITIES & VOICE ENGINE (ROBUST VERSION) ---
+# --- 3. UTILITIES & VOICE ENGINE (FINAL ROBUST VERSION) ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
@@ -88,20 +89,24 @@ def speech_to_text_robust(audio_data):
     if audio_data is None: return None
     r = sr.Recognizer()
     try:
-        # تحويل الـ Bytes لملف في الذاكرة
-        raw_audio = io.BytesIO(audio_data['bytes'])
+        # 1. تحويل الـ Bytes لملف WebM في الذاكرة
+        webm_audio = io.BytesIO(audio_data['bytes'])
         
-        # الطبقة التصحيحية: نضمن إن الملف مقروء كـ AudioSource
-        with sr.AudioFile(raw_audio) as source:
-            # تقليل الضوضاء أوتوماتيكياً قبل التحويل لتحسين الدقة
+        # 2. التحويل السحري من WebM لـ WAV باستخدام pydub لحل مشكلة الـ Headers
+        audio_segment = AudioSegment.from_file(webm_audio, format="webm")
+        wav_io = io.BytesIO()
+        audio_segment.export(wav_io, format="wav")
+        wav_io.seek(0)
+        
+        # 3. إرسال الإشارة للمحرك بعد التنسيق
+        with sr.AudioFile(wav_io) as source:
+            st.toast("🔊 Signal Normalized...", icon="✅")
             r.adjust_for_ambient_noise(source, duration=0.2)
             audio = r.record(source)
             
-        # محاولة التحويل (عربي)
         return r.recognize_google(audio, language="ar-EG")
     except Exception as e:
-        # طباعة الخطأ في الـ Logs للمساعدة في الـ Debugging
-        st.error(f"Voice Analysis Error: {e}")
+        st.error(f"Signal Processing Error: {e}")
         return None
 
 async def generate_audio(text):
@@ -125,7 +130,7 @@ def play_audio(text):
         if data: st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 4. ENGINE CORE (V17.2 - Stable Engine with Ranking) ---
+# --- 4. ENGINE CORE ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
@@ -156,12 +161,10 @@ def engine_v17_2(q, data):
     q_low = q.lower()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
     
-    # 1. تحديد الدول
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))
     if not selected_adms: return None, [], "ADM Error.", 0, False
 
-    # 2. تحديد الخدمات
     svc_codes = []
     if any(x in q_low for x in SYNONYMS['DAB_KEY']): svc_codes.extend(['GS1','GS2','DS1','DS2'])
     if any(x in q_low for x in SYNONYMS['TV_KEY']): svc_codes.extend(['T02','G02','GT1','GT2','DT1','DT2'])
@@ -185,7 +188,6 @@ def engine_v17_2(q, data):
         })
         final_df = pd.concat([final_df, adm_df], ignore_index=True)
 
-    # 3. Logic المقارنة والترتيب (Ranking)
     sorted_reports = sorted(reports, key=lambda x: x[comp_type], reverse=True)
     if len(reports) >= 2:
         if is_ar:
@@ -205,13 +207,11 @@ db = load_db()
 with st.container(border=True):
     c1, c2 = st.columns([1, 4])
     with c1:
-        # المايك الأصلي v17.0
         voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v172_mic")
     
     input_val = ""
     if voice_raw:
         with st.spinner("Analyzing Audio Signal..."):
-            # استخدام الفانكشن الـ Robust الجديدة
             input_val = speech_to_text_robust(voice_raw)
 
 query = st.text_input("Enter Spectrum Inquiry:", value=input_val)
@@ -221,7 +221,6 @@ if query and db is not None:
     res_df, reports, msg, conf, success = engine_v17_2(query, db)
     
     if success:
-        # Flags & Metrics
         m_cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with m_cols[i]:
@@ -232,7 +231,6 @@ if query and db is not None:
         st.success(msg)
         play_audio(msg)
 
-        # Dashboards & Analytics
         col_left, col_right = st.columns(2)
         chart_data = pd.DataFrame(reports)
         with col_left:
