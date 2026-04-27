@@ -1,120 +1,201 @@
+import os
+import re
+ # -----------------------------import time
+    # OUTPUT
+    # -----------------------------
+    st.subheader("✅ Answer")
+    st.write(
+        f"**{country} has {count} {qtype} {service} records.**"
+    )
+
+    st.info(f"Confidence: {confidence}%")
+
+    st.subheader("📊 Distribution")
+    chart_data = result_df["Notice Type"].value_counts()
+
+    if not chart_data.empty:
+        fig, ax = plt.subplots()
+        chart_data.plot(kind="bar", ax=ax)
+        ax.set_ylabel("Count")
+        ax.set_xlabel("Notice Type")
+        st.pyplot(fig)
+    else:
+        st.write("No data to display.")
+``
+import tempfile
+
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 import speech_recognition as sr
-import numpy as np
-import time
 
-# Dictionary lel synonyms 3shan el model yfham el country names w el terminology
-SYNONYMS = {
-    'egypt': ['masr', 'misr', 'مصر'],
-    'saudi': ['el so3deya', 'ksa', 'السعودية', 'saudi arabia'],
-    'turkey': ['turkeya', 'tur', 'تركيا'],
-    'takhsees': ['assignment', 'takhsees', 'تخصيص'],
-    'twzee3': ['allotment', 'twzee3', 'توزيع']
+# -----------------------------
+# PAGE CONFIG
+# -----------------------------
+st.set_page_config(
+    page_title="Voice Assistant Prototype",
+    layout="centered"
+)
+
+st.title("🎙️ Voice Assistant – Prototype (Stage 1)")
+st.write("Arabic OR English only • Audio upload (wav / mp3)")
+
+# -----------------------------
+# CHECK DATA FILE
+# -----------------------------
+DATA_FILE = "data.xlsx"
+
+if not os.path.exists(DATA_FILE):
+    st.error(
+        "❌ data.xlsx file not found.\n\n"
+        "Please make sure `data.xlsx` is in the same folder as `app.py`."
+    )
+    st.stop()
+
+# -----------------------------
+# LOAD DATA
+# -----------------------------
+@st.cache_data
+def load_data(path):
+    return pd.read_excel(path)
+
+df = load_data(DATA_FILE)
+
+# -----------------------------
+# NOTICE TYPE MAP
+# -----------------------------
+NOTICE_MAP = {
+    "GS1": ("DAB", "Assignment"),
+    "GS2": ("DAB", "Allotment"),
+    "DS1": ("DAB", "Assignment"),
+    "DS2": ("DAB", "Allotment"),
+    "GT1": ("TV",  "Assignment"),
+    "GT2": ("TV",  "Allotment"),
+    "DT1": ("TV",  "Assignment"),
+    "DT2": ("TV",  "Allotment"),
 }
 
-# 1. Load Data & Notice Logic
-@st.cache_data
-def load_data():
-    # Replace with your actual raw link
-    url = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/data.xlsx"
-    df = pd.read_excel(url)
-    return df
+# -----------------------------
+# COUNTRY SYNONYMS
+# -----------------------------
+COUNTRIES = {
+    "TUR": ["turkey", "turkiye", "türkiye", "تركيا"],
+    "EGY": ["egypt", "masr", "misr", "مصر"],
+    "ISR": ["israel", "إسرائيل"],
+    "SAU": ["saudi", "ksa", "السعودية"]
+}
 
-def get_audio_level(audio_data):
-    # Calculate simple dB level from audio bytes
-    audio_as_np = np.frombuffer(audio_data.get_raw_data(), dtype=np.int16)
-    rms = np.sqrt(np.mean(audio_as_np**2))
-    db = 20 * np.log10(rms) if rms > 0 else 0
-    return db
+# -----------------------------
+# SIMPLE NLP (ZERO INTELLIGENCE)
+# -----------------------------
+def detect_language(text):
+    ar = re.search(r"[ء-ي]", text)
+    en = re.search(r"[a-zA-Z]", text)
+    if ar and not en:
+        return "ar"
+    if en and not ar:
+        return "en"
+    return "mix"
 
-def start_listening():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.write("### 🎤 Listening...")
-        # Add a visual signal indicator placeholder
-        signal_placeholder = st.empty()
-        
-        # Adjust for ambient noise
-        r.adjust_for_ambient_noise(source, duration=0.5)
-        audio = r.listen(source)
-        
-        # Simulate dB detection for the UI
-        db_level = get_audio_level(audio)
-        signal_placeholder.metric("Input Signal Level", f"{db_level:.2f} dB")
-        
-        if db_level < 30: # Threshold example
-            st.warning("Low signal level. Please speak louder.")
-            
-        try:
-            # Arabic and English support
-            text = r.recognize_google(audio, language="ar-EG, en-US")
-            return text
-        except:
-            return None
+def extract_country(text):
+    t = text.lower()
+    for code, names in COUNTRIES.items():
+        for n in names:
+            if n in t:
+                return code
+    return None
 
-def process_query(query, df):
-    # Logic to identify Country, Service (DAB/TV), and Type (Assignment/Allotment)
-    query = query.lower()
-    
-    # 1. Identify Country (ADM)
-    found_adm = None
-    for key, values in SYNONYMS.items():
-        if any(v in query for v in values):
-            found_adm = key.upper() # Standardize to DF format
-            break
+def extract_service(text):
+    t = text.lower()
+    if "dab" in t or "إذاع" in t:
+        return "DAB"
+    if "tv" in t or "television" in t or "تلفزيون" in t:
+        return "TV"
+    return None
 
-    # 2. Identify Service & Type
-    # Simple logic: If query has "DAB" and "Takhsees", filter by DS1/GS1
-    # This is a "Zero Intelligence" logic but focused on your headers
-    
-    results = df # Placeholder filter
-    if "takhsees" in query or "assignment" in query:
-        results = df[df['Notice Type'].isin(['DS1', 'GS1', 'GT1', 'DT1'])]
-    elif "twzee3" in query or "allotment" in query:
-        results = df[df['Notice Type'].isin(['DS2', 'GS2', 'GT2', 'DT2'])]
+def extract_type(text):
+    t = text.lower()
+    if "assignment" in t or "تخصيص" in t:
+        return "Assignment"
+    if "allotment" in t or "توزيع" in t:
+        return "Allotment"
+    return None
 
-    return results
+# -----------------------------
+# UI – AUDIO UPLOAD
+# -----------------------------
+audio_file = st.file_uploader(
+    "Upload your voice question (wav / mp3)",
+    type=["wav", "mp3"]
+)
 
-def main():
-    st.set_page_config(page_title="NTRA Spectrum Assistant", layout="wide")
-    st.title("📡 Regulatory Voice Assistant (DAB & TV)")
-    
-    df = load_data()
+progress = st.progress(0)
+status = st.empty()
 
-    if st.button("🎤 Start Voice Query"):
-        query_text = start_listening()
-        
-        if query_text:
-            st.info(f"Detected: {query_text}")
-            
-            # Progress Bar for "Processing"
-            progress_bar = st.progress(0)
-            for percent_complete in range(100):
-                time.sleep(0.01)
-                progress_bar.progress(percent_complete + 1)
-            
-            # Answer Logic
-            results = process_query(query_text, df)
-            
-            # Display Confidence (Simulated for Zero Intelligence)
-            st.sidebar.write(f"Confidence: 95%") 
-            
-            # Output Display
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("📊 Statistics")
-                if not results.empty:
-                    stats = results.groupby('Administration').size()
-                    st.bar_chart(stats)
-                    st.write(f"Total count found: {len(results)}")
-            
-            with col2:
-                st.subheader("📋 Data Preview")
-                st.write(results.head(10))
-        else:
-            st.error("Could not understand the voice input. Please try again.")
+# -----------------------------
+# PROCESS AUDIO
+# -----------------------------
+if audio_file:
+    progress.progress(10)
+    status.text("Processing audio...")
 
-if __name__ == "__main__":
-    main()
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(audio_file.read())
+        audio_path = tmp.name
+
+    recognizer = sr.Recognizer()
+
+    try:
+        with sr.AudioFile(audio_path) as source:
+            audio = recognizer.record(source)
+        text = recognizer.recognize_google(audio)
+    except Exception as e:
+        st.error("❌ Could not recognize the audio.")
+        st.stop()
+
+    progress.progress(40)
+
+    st.subheader("📝 Transcribed Text")
+    st.write(text)
+
+    lang = detect_language(text)
+    if lang == "mix":
+        st.error("Please speak Arabic OR English only (no mix).")
+        st.stop()
+
+    progress.progress(60)
+    status.text("Analyzing question...")
+
+    country = extract_country(text)
+    service = extract_service(text)
+    qtype = extract_type(text)
+
+    confidence = int(
+        (sum([
+            country is not None,
+            service is not None,
+            qtype is not None
+        ]) / 3) * 100
+    )
+
+    # -----------------------------
+    # FILTER DATA
+    # -----------------------------
+    result_df = df.copy()
+
+    if country:
+        result_df = result_df[result_df["Administration"] == country]
+
+    valid_notice_types = [
+        k for k, v in NOTICE_MAP.items()
+        if v[0] == service and v[1] == qtype
+    ]
+
+    if valid_notice_types:
+        result_df = result_df[result_df["Notice Type"].isin(valid_notice_types)]
+
+    count = len(result_df)
+
+    progress.progress(100)
+    status.text("✅ Done")
+
