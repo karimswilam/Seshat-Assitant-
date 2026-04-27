@@ -93,6 +93,7 @@ def speech_to_text_robust(audio_data):
     if audio_data is None: return None
     r = sr.Recognizer()
     try:
+        # تحويل الـ WebM القادم من المتصفح إلى WAV باستخدام Pydub (تتطلب FFmpeg)
         webm_audio = io.BytesIO(audio_data['bytes'])
         audio_segment = AudioSegment.from_file(webm_audio, format="webm")
         wav_io = io.BytesIO()
@@ -105,7 +106,8 @@ def speech_to_text_robust(audio_data):
         st.error(f"Signal Processing Error: {e}")
         return None
 
-async def generate_audio(text):
+async def generate_audio_stream(text):
+    """دالة لتوليد ملف الصوت بصيغة MP3 من النص"""
     try:
         is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
         voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
@@ -113,4 +115,27 @@ async def generate_audio(text):
         communicate = edge_tts.Communicate(clean_text, voice, rate="-5%")
         audio_data = io.BytesIO()
         async for chunk in communicate.stream():
-            if chunk["type"]
+            if chunk["type"] == "audio":
+                audio_data.write(chunk["data"])
+        return audio_data.getvalue()
+    except Exception as e:
+        return None
+
+# --- 4. MAIN INTERFACE LOGIC ---
+st.subheader("🎙️ Voice Intelligence Control")
+audio_input = mic_recorder(start_prompt="Click to Speak", stop_prompt="Stop & Process", key='recorder')
+
+if audio_input:
+    query_text = speech_to_text_robust(audio_input)
+    if query_text:
+        st.success(f"Recognized: {query_text}")
+        # هنا يتم وضع منطق البحث في البيانات الخاص بك (Excel/Dataframe)
+        # وسنقوم بتشغيل محرك الرد الصوتي (TTS)
+        loop = asyncio.get_event_loop()
+        reply_audio = loop.run_until_complete(generate_audio_stream(f"لقد استلمت استفسارك بخصوص {query_text}"))
+        if reply_audio:
+            st.audio(reply_audio, format="audio/mp3")
+    else:
+        st.warning("Signal weak or unrecognized. Please try again.")
+
+# ملاحظة هندسية: تأكد من وجود ملف packages.txt وبه سطر ffmpeg لضمان عمل pydub.
