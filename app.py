@@ -1,137 +1,196 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os, io, asyncio, time
-import edge_tts
-from streamlit_mic_recorder import mic_recorder
+import matplotlib.pyplot as plt
 import speech_recognition as sr
-from rapidfuzz import process, fuzz
+import time
+import re
 
-# --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v2026 - Voice Pro")
+# ----------------------------
+# CONFIG
+# ----------------------------
+st.set_page_config(page_title="Voice Data Assistant", layout="centered")
 
-# Logic Constants
-FLAGS = {'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png", 'ISR': "https://flagcdn.com/w640/il.png"}
-COUNTRY_MAP = {'EGY': ['egypt', 'egy', 'مصر'], 'ARS': ['saudi', 'ars', 'ksa', 'السعودية'], 'ISR': ['israel', 'isr', 'اسرائيل']}
+DATA_PATH = "data.xlsx"
 
-# --- 2. ADVANCED AUDIO ENGINE (Signal Analysis & STT) ---
-def analyze_and_recognize(audio_bytes):
-    # 1. Signal Analysis (dB Level)
-    audio_data = np.frombuffer(audio_bytes, dtype=np.int16)
-    rms = np.sqrt(np.mean(audio_data**2))
-    db_level = 20 * np.log10(rms) if rms > 0 else 0
-    
-    # 2. Recognition Logic
+# ----------------------------
+# LOAD DATA
+# ----------------------------
+@st.cache_data
+def load_data(path):
+    return pd.read_excel(path)
+
+df = load_data(DATA_PATH)
+
+# ----------------------------
+# NOTICE TYPE DICTIONARY
+# ----------------------------
+NOTICE_MAP = {
+    "GS1": {"service": "DAB", "type": "Assignment"},
+    "GS2": {"service": "DAB", "type": "Allotment"},
+    "DS1": {"service": "DAB", "type": "Assignment"},
+    "DS2": {"service": "DAB", "type": "Allotment"},
+    "GT1": {"service": "TV", "type": "Assignment"},
+    "GT2": {"service": "TV", "type": "Allotment"},
+    "DT1": {"service": "TV", "type": "Assignment"},
+    "DT2": {"service": "TV", "type": "Allotment"},
+}
+
+# ----------------------------
+# COUNTRY SYNONYMS
+# ----------------------------
+COUNTRIES = {
+    "turkey": ["turkey", "türkiye", "turkiye", "تركيا"],
+    "egypt": ["egypt", "masr", "misr", "مصر"],
+    "israel": ["israel", "إسرائيل"],
+    "saudi arabia": ["saudi", "ksa", "السعودية", "المملكة"]
+}
+
+# ----------------------------
+# TEXT PARSING
+# ----------------------------
+def detect_language(text):
+    if re.search(r'[a-zA-Z]', text) and not re.search(r'[ء-ي]', text):
+        return "en"
+    if re.search(r'[ء-ي]', text) and not re.search(r'[a-zA-Z]', text):
+        return "ar"
+    return "mix"
+
+def extract_country(text):
+    text = text.lower()
+    for country, aliases in COUNTRIES.items():
+        for a in aliases:
+            if a in text:
+                return country.upper()
+    return None
+
+def extract_service(text):
+    text = text.lower()
+    if "dab" in text or "إذاعي" in text or "اذاعة" in text:
+        return "DAB"
+    if "tv" in text or "television" in text or "تلفزيون" in text:
+        return "TV"
+    return None
+
+def extract_type(text):
+    text = text.lower()
+    if "assignment" in text or "تخصيص" in text:
+        return "Assignment"
+    if "allotment" in text or "توزيع" in text:
+        return "Allotment"
+    return None
+
+# ----------------------------
+# VOICE INPUT
+# ----------------------------
+def record_voice():
+    recognizer = sr.Recognizer()
+    mic = sr.Microphone()
+
+    with mic as source:
+        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+        audio = recognizer.listen(source)
+
+    return audio
+
+def speech_to_text(audio):
     r = sr.Recognizer()
-    audio_file = io.BytesIO(audio_bytes)
-    with sr.AudioFile(audio_file) as source:
-        audio = r.record(source)
-    
     try:
-        # بنجرب التعرف على العربي والإنجليزي مع بعض
-        text = r.recognize_google(audio, language="ar-EG")
-        return text, db_level, True
-    except sr.UnknownValueError:
-        return None, db_level, False
-    except Exception as e:
-        return f"Error: {str(e)}", db_level, False
+        text = r.recognize_google(audio)
+        return text
+    except:
+        return ""
 
-async def text_to_speech(text):
-    is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in text)
-    voice = "ar-EG-ShakirNeural" if is_ar else "en-US-AndrewNeural"
-    communicate = edge_tts.Communicate(text, voice)
-    data = io.BytesIO()
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            data.write(chunk["data"])
-    data.seek(0)
-    return data
+# ----------------------------
+# UI
+# ----------------------------
+st.title("🎙️ Voice Assistant for Broadcasting Data")
 
-# --- 3. CORE CALCULATION ENGINE (Placeholder for your enginev170) ---
-def enginev170_mock(user_input, df):
-    # ده محاكي لمنطق التخصيص بتاعك (Israel/DAB)
-    found_isr = any(word in user_input.lower() for word in ['israel', 'اسرائيل'])
-    found_dab = any(word in user_input.lower() for word in ['dab', 'داب', 'تخصيص'])
-    
-    if found_isr and found_dab:
-        msg = "تم فحص قاعدة البيانات: إسرائيل لديها 14 تخصيص داب (DAB) مفعلة حالياً."
-        return pd.DataFrame({"Item": ["DAB"], "Count": [14]}), msg, True
-    return None, "لم أستطع تحديد الطلب بدقة، يرجى إعادة الصياغة.", False
+st.write("Ask in **Arabic or English only**. No mix.")
 
-# --- 4. UI LAYOUT ---
-st.title("🎙️ Seshat Voice Assistant 2026")
+audio_level = st.progress(0)
+process_bar = st.progress(0)
+status = st.empty()
 
-# Sidebar for Database status
-with st.sidebar:
-    st.header("System Status")
-    uploaded_file = st.file_uploader("Upload Data.xlsx", type=['xlsx'])
-    if uploaded_file:
-        df = pd.read_excel(uploaded_file)
-        st.success("Database Loaded!")
-    else:
-        st.warning("Please upload 'Data.xlsx'")
-        df = None
+if st.button("🎤 Start Recording"):
+    status.text("Listening...")
+    audio_level.progress(30)
 
-# Main Voice Interaction Area
-st.subheader("Interactive Voice Control")
-audio_input = mic_recorder(
-    start_prompt="🎤 Start Asking (English/Arabic)",
-    stop_prompt="🛑 Stop & Process",
-    key="voice_input"
-)
+    audio = record_voice()
+    audio_level.progress(80)
 
-if audio_input:
-    # 1. Validation Step (Signal Analysis)
-    raw_bytes = audio_input['bytes']
-    text_query, db_level, success = analyze_and_recognize(raw_bytes)
-    
-    # Visual dB Meter
-    st.write(f"**Signal Level:** {db_level:.2f} dB")
-    st.progress(min(max(int(db_level), 0), 100) / 100.0)
-    
-    if db_level < 10:
-        st.error("Low signal detected. Please speak louder.")
-    
-    # 2. Processing Steps (Status Bar)
-    with st.status("Processing Audio Content...", expanded=True) as status:
-        st.write("🔍 Analyzing Signal Frequencies...")
-        time.sleep(0.6)
-        st.write("🤖 Converting Speech to Text (STT)...")
-        time.sleep(0.8)
-        
-        if success:
-            st.write("✅ Text Recognition Successful!")
-            status.update(label="Processing Complete!", state="complete", expanded=False)
-            
-            # عرض السؤال
-            st.chat_message("user").write(text_query)
-            
-            # نداء الـ Engine
-            if df is not None:
-                res_df, response_text, engine_ok = enginev170_mock(text_query, df)
-                
-                if engine_ok:
-                    st.chat_message("assistant").write(response_text)
-                    if res_df is not None:
-                        st.table(res_df)
-                    
-                    # الرد الصوتي
-                    audio_output = asyncio.run(text_to_speech(response_text))
-                    st.audio(audio_output, format="audio/mp3")
-                else:
-                    st.warning("Kalam skipped: " + response_text)
-        else:
-            # حالة عدم فهم الكلام (Skip logic)
-            st.write("⚠️ Low Confidence in Speech Detection")
-            status.update(label="Processing Failed", state="error")
-            st.error("مفهمتش الجزء ده في الريكورد، ياريت تعيد السؤال بوضوح.")
-            st.info("Tip: Try to avoid background noise.")
+    process_bar.progress(20)
+    status.text("Processing voice input...")
 
-# --- 5. DASHBOARD VISUALS (Static example) ---
-if df is not None:
-    st.divider()
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total Allocations", len(df))
-    with col2:
-        st.image(FLAGS['ISR'], width=100, caption="Current Target Filter")
+    time.sleep(0.5)
+
+    text = speech_to_text(audio)
+    process_bar.progress(40)
+
+    st.subheader("📝 Transcribed Text")
+    st.write(text if text else "❌ No speech detected")
+
+    if not text:
+        st.stop()
+
+    lang = detect_language(text)
+    if lang == "mix":
+        st.error("Please input voice in Arabic OR English (no mix).")
+        st.stop()
+
+    country = extract_country(text)
+    service = extract_service(text)
+    qtype = extract_type(text)
+
+    score = sum([country is not None, service is not None, qtype is not None])
+    confidence = int((score / 3) * 100)
+
+    process_bar.progress(60)
+    status.text("Querying data...")
+
+    time.sleep(0.5)
+
+    # Filter Notice Types
+    valid_notices = [
+        k for k, v in NOTICE_MAP.items()
+        if v["service"] == service and v["type"] == qtype
+    ]
+
+    result_df = df.copy()
+
+    if country:
+        result_df = result_df[result_df["Administration"] == country]
+
+    if valid_notices:
+        result_df = result_df[result_df["Notice Type"].isin(valid_notices)]
+
+    count = len(result_df)
+
+    process_bar.progress(90)
+    status.text("Generating output...")
+
+    time.sleep(0.5)
+    process_bar.progress(100)
+    status.text("✅ Done")
+
+    st.subheader("✅ Answer")
+    st.write(
+        f"{country} has **{count} {qtype} {service} records**."
+    )
+
+    st.info(f"Confidence: {confidence}%")
+
+    # ----------------------------
+    # BAR CHART
+    # ----------------------------
+    st.subheader("📊 Statistics")
+
+    chart_df = result_df["Notice Type"].value_counts()
+
+    fig, ax = plt.subplots()
+    chart_df.plot(kind="bar", ax=ax)
+    ax.set_ylabel("Count")
+    ax.set_xlabel("Notice Type")
+    ax.set_title("Distribution")
+
+    st.pyplot(fig)
