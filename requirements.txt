@@ -1,7 +1,6 @@
 streamlit
 pandas
-openpyxl
-SpeechRecognition
-PyAudio
 numpy
+matplotlib
+SpeechRecognition
 openpyxl
