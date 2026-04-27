@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 import speech_recognition as sr
 import time
 import re
+import tempfile
 
 # ----------------------------
 # CONFIG
 # ----------------------------
 st.set_page_config(page_title="Voice Data Assistant", layout="centered")
-
 DATA_PATH = "data.xlsx"
 
 # ----------------------------
@@ -23,7 +23,7 @@ def load_data(path):
 df = load_data(DATA_PATH)
 
 # ----------------------------
-# NOTICE TYPE DICTIONARY
+# NOTICE TYPE LOGIC
 # ----------------------------
 NOTICE_MAP = {
     "GS1": {"service": "DAB", "type": "Assignment"},
@@ -37,106 +37,96 @@ NOTICE_MAP = {
 }
 
 # ----------------------------
-# COUNTRY SYNONYMS
+# SYNONYMS
 # ----------------------------
 COUNTRIES = {
-    "turkey": ["turkey", "türkiye", "turkiye", "تركيا"],
-    "egypt": ["egypt", "masr", "misr", "مصر"],
-    "israel": ["israel", "إسرائيل"],
-    "saudi arabia": ["saudi", "ksa", "السعودية", "المملكة"]
+    "TUR": ["turkey", "turkiye", "türkiye", "تركيا"],
+    "EGY": ["egypt", "masr", "misr", "مصر"],
+    "ISR": ["israel", "إسرائيل"],
+    "SAU": ["saudi", "ksa", "السعودية"]
 }
 
 # ----------------------------
-# TEXT PARSING
+# NLP (Zero Intelligence)
 # ----------------------------
 def detect_language(text):
-    if re.search(r'[a-zA-Z]', text) and not re.search(r'[ء-ي]', text):
-        return "en"
-    if re.search(r'[ء-ي]', text) and not re.search(r'[a-zA-Z]', text):
+    ar = re.search(r'[ء-ي]', text)
+    en = re.search(r'[a-zA-Z]', text)
+    if ar and not en:
         return "ar"
+    if en and not ar:
+        return "en"
     return "mix"
 
 def extract_country(text):
-    text = text.lower()
-    for country, aliases in COUNTRIES.items():
+    t = text.lower()
+    for code, aliases in COUNTRIES.items():
         for a in aliases:
-            if a in text:
-                return country.upper()
+            if a in t:
+                return code
     return None
 
 def extract_service(text):
-    text = text.lower()
-    if "dab" in text or "إذاعي" in text or "اذاعة" in text:
+    t = text.lower()
+    if "dab" in t or "إذاع" in t:
         return "DAB"
-    if "tv" in text or "television" in text or "تلفزيون" in text:
+    if "tv" in t or "television" in t or "تلفزيون" in t:
         return "TV"
     return None
 
 def extract_type(text):
-    text = text.lower()
-    if "assignment" in text or "تخصيص" in text:
+    t = text.lower()
+    if "assignment" in t or "تخصيص" in t:
         return "Assignment"
-    if "allotment" in text or "توزيع" in text:
+    if "allotment" in t or "توزيع" in t:
         return "Allotment"
     return None
 
 # ----------------------------
-# VOICE INPUT
-# ----------------------------
-def record_voice():
-    recognizer = sr.Recognizer()
-    mic = sr.Microphone()
-
-    with mic as source:
-        recognizer.adjust_for_ambient_noise(source, duration=0.5)
-        audio = recognizer.listen(source)
-
-    return audio
-
-def speech_to_text(audio):
-    r = sr.Recognizer()
-    try:
-        text = r.recognize_google(audio)
-        return text
-    except:
-        return ""
-
-# ----------------------------
 # UI
 # ----------------------------
-st.title("🎙️ Voice Assistant for Broadcasting Data")
+st.title("🎙️ Voice Assistant (Upload Audio)")
+st.write("✅ Arabic OR English only")
 
-st.write("Ask in **Arabic or English only**. No mix.")
+uploaded_audio = st.file_uploader(
+    "Upload voice file (wav / mp3)", type=["wav", "mp3"]
+)
 
-audio_level = st.progress(0)
-process_bar = st.progress(0)
+progress = st.progress(0)
 status = st.empty()
 
-if st.button("🎤 Start Recording"):
-    status.text("Listening...")
-    audio_level.progress(30)
+if uploaded_audio:
+    status.text("Processing audio...")
+    progress.progress(20)
 
-    audio = record_voice()
-    audio_level.progress(80)
+    # Save temp audio
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(uploaded_audio.read())
+        audio_path = tmp.name
 
-    process_bar.progress(20)
-    status.text("Processing voice input...")
+    recognizer = sr.Recognizer()
 
-    time.sleep(0.5)
+    with sr.AudioFile(audio_path) as source:
+        audio = recognizer.record(source)
 
-    text = speech_to_text(audio)
-    process_bar.progress(40)
+    progress.progress(50)
+
+    try:
+        text = recognizer.recognize_google(audio)
+    except:
+        st.error("❌ Could not recognize speech")
+        st.stop()
 
     st.subheader("📝 Transcribed Text")
-    st.write(text if text else "❌ No speech detected")
-
-    if not text:
-        st.stop()
+    st.write(text)
 
     lang = detect_language(text)
     if lang == "mix":
-        st.error("Please input voice in Arabic OR English (no mix).")
+        st.error("Please input voice in Arabic OR English (no mix)")
         st.stop()
+
+    progress.progress(70)
+    status.text("Analyzing query...")
 
     country = extract_country(text)
     service = extract_service(text)
@@ -145,12 +135,6 @@ if st.button("🎤 Start Recording"):
     score = sum([country is not None, service is not None, qtype is not None])
     confidence = int((score / 3) * 100)
 
-    process_bar.progress(60)
-    status.text("Querying data...")
-
-    time.sleep(0.5)
-
-    # Filter Notice Types
     valid_notices = [
         k for k, v in NOTICE_MAP.items()
         if v["service"] == service and v["type"] == qtype
@@ -166,31 +150,19 @@ if st.button("🎤 Start Recording"):
 
     count = len(result_df)
 
-    process_bar.progress(90)
-    status.text("Generating output...")
-
-    time.sleep(0.5)
-    process_bar.progress(100)
+    progress.progress(100)
     status.text("✅ Done")
 
     st.subheader("✅ Answer")
-    st.write(
-        f"{country} has **{count} {qtype} {service} records**."
-    )
-
+    st.write(f"{country} has **{count} {qtype} {service} records**")
     st.info(f"Confidence: {confidence}%")
 
-    # ----------------------------
-    # BAR CHART
-    # ----------------------------
-    st.subheader("📊 Statistics")
-
-    chart_df = result_df["Notice Type"].value_counts()
+    st.subheader("📊 Distribution")
+    chart_data = result_df["Notice Type"].value_counts()
 
     fig, ax = plt.subplots()
-    chart_df.plot(kind="bar", ax=ax)
+    chart_data.plot(kind="bar", ax=ax)
     ax.set_ylabel("Count")
     ax.set_xlabel("Notice Type")
-    ax.set_title("Distribution")
 
     st.pyplot(fig)
