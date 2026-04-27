@@ -17,10 +17,10 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v17.5")
+st.set_page_config(layout="wide", page_title="Seshat AI v17.2")
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Seshat Master Precision v17.5"
+PROJECT_NAME = "Seshat Master Precision v17.2"
 PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
@@ -69,7 +69,7 @@ SYNONYMS = {
     'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون']
 }
 
-# --- 3. UTILITIES & VOICE ENGINE ---
+# --- 3. UTILITIES & VOICE ENGINE (ROBUST VERSION) ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
@@ -84,15 +84,25 @@ def dms_to_decimal(dms_str):
     except: return None
     return None
 
-def stt_engine(audio_data):
+def speech_to_text_robust(audio_data):
     if audio_data is None: return None
     r = sr.Recognizer()
     try:
-        audio_stream = io.BytesIO(audio_data['bytes'])
-        with sr.AudioFile(audio_stream) as source:
+        # تحويل الـ Bytes لملف في الذاكرة
+        raw_audio = io.BytesIO(audio_data['bytes'])
+        
+        # الطبقة التصحيحية: نضمن إن الملف مقروء كـ AudioSource
+        with sr.AudioFile(raw_audio) as source:
+            # تقليل الضوضاء أوتوماتيكياً قبل التحويل لتحسين الدقة
+            r.adjust_for_ambient_noise(source, duration=0.2)
             audio = r.record(source)
-            return r.recognize_google(audio, language="ar-EG")
-    except: return None
+            
+        # محاولة التحويل (عربي)
+        return r.recognize_google(audio, language="ar-EG")
+    except Exception as e:
+        # طباعة الخطأ في الـ Logs للمساعدة في الـ Debugging
+        st.error(f"Voice Analysis Error: {e}")
+        return None
 
 async def generate_audio(text):
     try:
@@ -115,7 +125,7 @@ def play_audio(text):
         if data: st.audio(data, format="audio/mp3")
     except: pass
 
-# --- 4. ENGINE CORE (V17.5 - Fixed Ranking & Comparison) ---
+# --- 4. ENGINE CORE (V17.2 - Stable Engine with Ranking) ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
@@ -142,16 +152,16 @@ def load_db():
         return df
     return None
 
-def engine_v17_5(q, data):
+def engine_v17_2(q, data):
     q_low = q.lower()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
     
-    # تحديد الدول
+    # 1. تحديد الدول
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))
     if not selected_adms: return None, [], "ADM Error.", 0, False
 
-    # تحديد الخدمات
+    # 2. تحديد الخدمات
     svc_codes = []
     if any(x in q_low for x in SYNONYMS['DAB_KEY']): svc_codes.extend(['GS1','GS2','DS1','DS2'])
     if any(x in q_low for x in SYNONYMS['TV_KEY']): svc_codes.extend(['T02','G02','GT1','GT2','DT1','DT2'])
@@ -175,7 +185,7 @@ def engine_v17_5(q, data):
         })
         final_df = pd.concat([final_df, adm_df], ignore_index=True)
 
-    # Logic المقارنة الثلاثية (Ranking)
+    # 3. Logic المقارنة والترتيب (Ranking)
     sorted_reports = sorted(reports, key=lambda x: x[comp_type], reverse=True)
     if len(reports) >= 2:
         if is_ar:
@@ -195,18 +205,20 @@ db = load_db()
 with st.container(border=True):
     c1, c2 = st.columns([1, 4])
     with c1:
-        voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v175_mic")
+        # المايك الأصلي v17.0
+        voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v172_mic")
     
     input_val = ""
     if voice_raw:
-        with st.spinner("Processing..."):
-            input_val = stt_engine(voice_raw)
+        with st.spinner("Analyzing Audio Signal..."):
+            # استخدام الفانكشن الـ Robust الجديدة
+            input_val = speech_to_text_robust(voice_raw)
 
-query = st.text_input("Enter Spectrum Inquiry (Compare Egypt, Israel, Turkey...):", value=input_val)
+query = st.text_input("Enter Spectrum Inquiry:", value=input_val)
 
 if query and db is not None:
     play_audio(query)
-    res_df, reports, msg, conf, success = engine_v17_5(query, db)
+    res_df, reports, msg, conf, success = engine_v17_2(query, db)
     
     if success:
         # Flags & Metrics
@@ -220,18 +232,21 @@ if query and db is not None:
         st.success(msg)
         play_audio(msg)
 
-        # Dashboards
+        # Dashboards & Analytics
         col_left, col_right = st.columns(2)
         chart_data = pd.DataFrame(reports)
         with col_left:
             if PLOTLY_AVAILABLE:
-                fig = px.bar(chart_data, x="Adm", y=["Assignments", "Allotments"], barmode="group", title="Technical Distribution")
+                fig = px.bar(chart_data, x="Adm", y=["Assignments", "Allotments"], barmode="group", 
+                             title="Technical Spectrum Distribution")
                 st.plotly_chart(fig, use_container_width=True)
         with col_right:
             if PLOTLY_AVAILABLE and not res_df.empty:
                 map_df = res_df.dropna(subset=['lat_dec', 'lon_dec'])
                 if not map_df.empty:
-                    fig_map = px.scatter_mapbox(map_df, lat="lat_dec", lon="lon_dec", color="Adm", zoom=3, mapbox_style="carto-positron")
+                    fig_map = px.scatter_mapbox(map_df, lat="lat_dec", lon="lon_dec", color="Adm", 
+                                                zoom=3, mapbox_style="carto-positron", height=400)
                     st.plotly_chart(fig_map, use_container_width=True)
 
-        with st.expander("Detailed Records"): st.dataframe(res_df)
+        with st.expander("Detailed Technical Records (Filtered)"): 
+            st.dataframe(res_df, use_container_width=True)
