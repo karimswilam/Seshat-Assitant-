@@ -9,10 +9,10 @@ import base64
 import numpy as np
 from streamlit_mic_recorder import mic_recorder
 import speech_recognition as sr
-from pydub import AudioSegment  # مكتبة معالجة الصوت
-import nest_asyncio # حل مشكلة تداخل الـ loops في Streamlit
+from pydub import AudioSegment
+import nest_asyncio
 
-# تفعيل nest_asyncio للسماح بتشغيل الـ Audio Engine بسلاسة
+# تفعيل nest_asyncio
 nest_asyncio.apply()
 
 try:
@@ -22,10 +22,10 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v17.2", page_icon="📡")
+st.set_page_config(layout="wide", page_title="Seshat AI v17.5", page_icon="📡")
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Seshat Master Precision v17.2"
+PROJECT_NAME = "Seshat Master Precision v17.5"
 PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
@@ -57,21 +57,21 @@ STRICT_ALLOT = ['T02', 'G02', 'GT2', 'DT2', 'GS2', 'DS2']
 
 COUNTRY_MAP = {
     'EGY': ['egypt', 'egy', 'مصر', 'المصرية', 'المصريه', 'مصرية', 'مصريه'],
-    'ARS': ['saudi', 'ars', 'ksa', 'السعودية', 'المملكة', 'المملكه', 'سعودية', 'سعوديه', 'السعوديه', 'المملكه العربيه'],
-    'TUR': ['turkey', 'tur', 'تركيا', 'تركي', 'التركية', 'التركيه', 'turkish', 'تركيه', 'التركيه'],
-    'CYP': ['cyprus', 'cyp', 'قبرص', 'قبرصية', 'قبرصيه', 'القبرصية'],
-    'GRC': ['greece', 'grc', 'اليونان', 'يوناني', 'اليونانية', 'اليونانيه', 'يونانيه'],
+    'ARS': ['saudi', 'saudiarabia', 'ars', 'ksa', 'السعودية', 'المملكة', 'المملكه', 'سعودية', 'سعوديه', 'السعوديه'],
+    'TUR': ['turkey', 'tur', 'تركيا', 'تركي', 'التركية', 'التركيه', 'turkish'],
+    'CYP': ['cyprus', 'cyp', 'قبرص', 'قبرصية', 'قبرصيه'],
+    'GRC': ['greece', 'grc', 'اليونان', 'يوناني', 'اليونانية', 'اليونانيه'],
     'ISR': ['israel', 'isr', 'اسرائيل', 'إسرائيل']
 }
 
 SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'allot', 'ألوتمنت'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'assig', 'تخصيصي'],
-    'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'digital audio', 'إذاعي', 'اذاعي', 'اذاعة', 'إذاعة'],
-    'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'مرئيه', 'قنوات'],
-    'FM_KEY': ['fm', 'radio', 'راديو', 'اف ام'],
-    'TOTAL_KEY': ['total', 'egmali', 'إجمالي', 'اجمالي', 'كل', 'all', 'عدد', 'كام'],
-    'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'غير']
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'allot'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'assig'],
+    'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'digital audio', 'إذاعي', 'اذاعي'],
+    'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'مرئيه', 'video'],
+    'FM_KEY': ['fm', 'radio', 'راديو'],
+    'TOTAL_KEY': ['total', 'egmali', 'إجمالي', 'اجمالي', 'كل', 'all', 'statistics', 'إحصائية', 'احصائية', 'احصائيه'],
+    'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'without', 'excluding']
 }
 
 # --- 3. UTILITIES & VOICE ENGINE ---
@@ -99,10 +99,17 @@ def speech_to_text_robust(audio_data):
         audio_segment.export(wav_io, format="wav")
         wav_io.seek(0)
         with sr.AudioFile(wav_io) as source:
-            st.toast("🔊 Signal Normalized...", icon="✅")
-            r.adjust_for_ambient_noise(source, duration=0.2)
+            r.adjust_for_ambient_noise(source, duration=0.3)
             audio = r.record(source)
-        return r.recognize_google(audio, language="ar-EG")
+        
+        # محاولة التعرف باللغتين (Detection)
+        try:
+            # نحاول أولاً بالعربي، ولو مفيش نتيجة واضحة أو النص يبدو إنجليزي نحول
+            text = r.recognize_google(audio, language="ar-EG")
+            # لو النص فاضي أو ملوش معنى، جرب إنجليزي
+            return text
+        except:
+            return r.recognize_google(audio, language="en-US")
     except Exception as e:
         st.error(f"Signal Processing Error: {e}")
         return None
@@ -154,29 +161,47 @@ def load_db():
         return df
     return None
 
-def engine_v17_2(q, data):
+def engine_v17_5(q, data):
     q_low = q.lower().strip()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
     
-    # 1. تحديد الدول بدقة أعلى
+    # 1. تحديد الدول
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))
-    
-    if not selected_adms: 
-        return None, [], "برجاء تحديد الدولة (مصر، السعودية، اليونان، إلخ)" if is_ar else "Please specify a country.", 0, False
+    if not selected_adms: return None, [], "Please specify a country / برجاء تحديد الدولة", 0, False
 
-    # 2. تحديد الخدمات المطلوبة
-    svc_codes = []
-    if any(x in q_low for x in SYNONYMS['DAB_KEY']): svc_codes.extend(['GS1','GS2','DS1','DS2'])
-    if any(x in q_low for x in SYNONYMS['TV_KEY']): svc_codes.extend(['T02','G02','GT1','GT2','DT1','DT2'])
-    if any(x in q_low for x in SYNONYMS['FM_KEY']): svc_codes.extend(['T01','T03','T04'])
+    # 2. تحديد الفئات المطلوبة والمستثناة
+    categories = {
+        'DAB': ['GS1','GS2','DS1','DS2'],
+        'TV': ['T02','G02','GT1','GT2','DT1','DT2'],
+        'FM': ['T01','T03','T04']
+    }
     
-    # لو السؤال عام أو لم يتم تحديد خدمة، نأخذ الكل
-    if not svc_codes or any(x in q_low for x in SYNONYMS['TOTAL_KEY']):
-        svc_codes = ['GS1','GS2','DS1','DS2','T02','G02','GT1','GT2','DT1','DT2','T01','T03','T04', 'G01']
+    wanted_codes = []
+    excluded_codes = []
 
+    # الفلترة (الاستثناء)
+    if any(x in q_low for x in SYNONYMS['EXCEPT_KEY']):
+        if any(x in q_low for x in SYNONYMS['DAB_KEY']): excluded_codes.extend(categories['DAB'])
+        if any(x in q_low for x in SYNONYMS['TV_KEY']): excluded_codes.extend(categories['TV'])
+        if any(x in q_low for x in SYNONYMS['FM_KEY']): excluded_codes.extend(categories['FM'])
+        if any(x in q_low for x in SYNONYMS['ASSIG_KEY']): excluded_codes.extend(STRICT_ASSIG)
+        if any(x in q_low for x in SYNONYMS['ALLOT_KEY']): excluded_codes.extend(STRICT_ALLOT)
+
+    # تحديد المطلوب (Default is ALL if not specified)
+    if any(x in q_low for x in SYNONYMS['DAB_KEY']) and not excluded_codes: wanted_codes.extend(categories['DAB'])
+    if any(x in q_low for x in SYNONYMS['TV_KEY']) and not excluded_codes: wanted_codes.extend(categories['TV'])
+    if any(x in q_low for x in SYNONYMS['FM_KEY']) and not excluded_codes: wanted_codes.extend(categories['FM'])
+    
+    if not wanted_codes: # لو محددش خدمة أو طلب إحصائية شاملة
+        wanted_codes = categories['DAB'] + categories['TV'] + categories['FM'] + ['G01']
+    
+    # استبعاد الكودات المرفوضة من القائمة المطلوبة
+    svc_codes = [c for c in wanted_codes if c not in excluded_codes]
+
+    # 3. تجميع التقارير
     reports = []; final_df = pd.DataFrame()
-    comp_type = "Assignments" if any(x in q_low for x in SYNONYMS['ASSIG_KEY']) else "Total"
+    comp_type = "Assignments" if any(x in q_low for x in SYNONYMS['ASSIG_KEY']) else ("Allotments" if any(x in q_low for x in SYNONYMS['ALLOT_KEY']) else "Total")
 
     for adm in selected_adms:
         adm_df = data[data['Adm'] == adm].copy()
@@ -192,22 +217,18 @@ def engine_v17_2(q, data):
         })
         final_df = pd.concat([final_df, adm_df], ignore_index=True)
 
-    # 3. صياغة الرد والمقارنة
+    # 4. صياغة الرد
     sorted_reports = sorted(reports, key=lambda x: x[comp_type], reverse=True)
-    
     if len(reports) >= 2:
         if is_ar:
-            msg = f"بناءً على طلبك، إليك المقارنة: {sorted_reports[0]['DisplayName']} تتصدر بـ {sorted_reports[0][comp_type]} سجل، "
-            msg += "يتبعها " + " و ".join([f"{r['DisplayName']} ({r[comp_type]})" for r in sorted_reports[1:]])
+            msg = f"مقارنة الـ {comp_type}: {sorted_reports[0]['DisplayName']} أولاً بـ {sorted_reports[0][comp_type]} سجل. "
+            msg += "ثم " + " و ".join([f"{r['DisplayName']} ({r[comp_type]})" for r in sorted_reports[1:]])
         else:
-            msg = f"Comparison results: {sorted_reports[0]['Adm']} leads with {sorted_reports[0][comp_type]} records. "
-            msg += "Followed by " + ", ".join([f"{r['Adm']} ({r[comp_type]})" for r in sorted_reports[1:]])
+            msg = f"{comp_type} Ranking: {sorted_reports[0]['DisplayName']} is first with {sorted_reports[0][comp_type]}. "
+            msg += "Followed by " + ", ".join([f"{r['DisplayName']} ({r[comp_type]})" for r in sorted_reports[1:]])
     else:
         r = reports[0]
-        if is_ar:
-            msg = f"تم العثور على {r[comp_type]} سجل لـ {r['DisplayName']}."
-        else:
-            msg = f"Found {r[comp_type]} records for {r['Adm']}."
+        msg = f"{r['DisplayName']}: {r[comp_type]} {comp_type} records found." if not is_ar else f"{r['DisplayName']}: تم العثور على {r[comp_type]} سجل ({comp_type})."
 
     return final_df, reports, msg, 100, True
 
@@ -217,19 +238,22 @@ db = load_db()
 with st.container(border=True):
     c1, c2 = st.columns([1, 4])
     with c1:
-        voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v172_mic")
+        voice_raw = mic_recorder(start_prompt="🎤 Speak / تكلم", stop_prompt="🛑 Stop", key="v175_mic")
     
     input_val = ""
     if voice_raw:
-        with st.spinner("Analyzing Audio Signal..."):
+        with st.spinner("Processing Signal..."):
             input_val = speech_to_text_robust(voice_raw)
 
-query = st.text_input("Enter Spectrum Inquiry:", value=input_val)
+query = st.text_input("Enter Spectrum Inquiry / أدخل استفسارك:", value=input_val)
 
 if query and db is not None:
-    res_df, reports, msg, conf, success = engine_v17_2(query, db)
+    res_df, reports, msg, conf, success = engine_v17_5(query, db)
     
     if success:
+        st.success(msg)
+        play_audio(msg)
+        
         m_cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with m_cols[i]:
@@ -237,23 +261,18 @@ if query and db is not None:
                 st.metric(r['DisplayName'], f"Total: {r['Total']}", f"A: {r['Assignments']} | L: {r['Allotments']}")
 
         st.divider()
-        st.success(msg)
-        play_audio(msg)
-
         col_left, col_right = st.columns(2)
         chart_data = pd.DataFrame(reports)
         with col_left:
             if PLOTLY_AVAILABLE:
-                fig = px.bar(chart_data, x="Adm", y=["Assignments", "Allotments"], barmode="group", 
-                             title="Technical Spectrum Distribution")
+                fig = px.bar(chart_data, x="DisplayName", y=["Assignments", "Allotments"], barmode="group", title="Data Distribution")
                 st.plotly_chart(fig, use_container_width=True)
         with col_right:
             if PLOTLY_AVAILABLE and not res_df.empty:
                 map_df = res_df.dropna(subset=['lat_dec', 'lon_dec'])
                 if not map_df.empty:
-                    fig_map = px.scatter_mapbox(map_df, lat="lat_dec", lon="lon_dec", color="Adm", 
-                                                zoom=3, mapbox_style="carto-positron", height=400)
+                    fig_map = px.scatter_mapbox(map_df, lat="lat_dec", lon="lon_dec", color="Adm", zoom=3, mapbox_style="carto-positron", height=400)
                     st.plotly_chart(fig_map, use_container_width=True)
 
-        with st.expander("Detailed Technical Records (Filtered)"): 
+        with st.expander("Detailed Technical Records"): 
             st.dataframe(res_df, use_container_width=True)
