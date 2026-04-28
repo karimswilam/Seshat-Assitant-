@@ -10,3 +10,4 @@ SpeechRecognition
 pydub
 numpy
 nest-asyncio
+streamlit-extras
