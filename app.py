@@ -23,7 +23,7 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat  v18.5", page_icon="📡")
+st.set_page_config(layout="wide", page_title="Se-Chat v18.5", page_icon="📡")
 
 st.markdown("""
     <style>
@@ -81,14 +81,14 @@ COUNTRY_MAP = {
 }
 
 SYNONYMS = {
-    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'allot'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'assig'],
+    'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'allot', 'allots'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'assig', 'assigs'],
     'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'digital audio'],
     'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'مرئيه'],
     'FM_KEY': ['fm', 'radio', 'راديو'],
     'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'without', 'excluding'],
-    'GE06_KEY': ['ge06', 'جي إي 06'],
-    'GE84_KEY': ['ge84', 'جي إي 84']
+    'GE06_KEY': ['ge06', 'geneva06', 'geneva 06', 'geneva o 6', 'جنيف 06', 'جي إي 06', 'ge06d'],
+    'GE84_KEY': ['ge84', 'geneva84', 'geneva 84', 'جنيف 84', 'جي إي 84', 'اربعة وثمانين', '84']
 }
 
 # --- 3. UTILITIES & VOICE ENGINE ---
@@ -129,10 +129,16 @@ def speech_to_text_robust(audio_data):
         with sr.AudioFile(wav_io) as source:
             r.adjust_for_ambient_noise(source, duration=0.3)
             audio = r.record(source)
+        
+        # محاولة التعرف على الإنجليزية أولاً بدقة عالية
         try:
-            raw_text = r.recognize_google(audio, language="ar-EG")
-        except:
-            raw_text = r.recognize_google(audio, language="en-US")
+            english_text = r.recognize_google(audio, language="en-US")
+            # لو النص يبدو إنجليزي فعلاً (أكثر من كلمة أو كلمات مفتاحية هندسية) نرجعه
+            if any(word in english_text.lower() for word in ['how', 'many', 'egypt', 'assignment', 'allotment', 'ge06']):
+                return english_text
+        except: pass
+        
+        raw_text = r.recognize_google(audio, language="ar-EG")
         return apply_phonetic_correction(raw_text)
     except Exception as e:
         return None
@@ -163,7 +169,6 @@ def speak_text(text):
 def load_db():
     main_df = pd.DataFrame()
     
-    # تحميل الملف الأساسي (GE06 - TV/DAB)
     target_main = "Data.xlsx"
     if os.path.exists(target_main):
         df1 = pd.read_excel(target_main)
@@ -171,7 +176,6 @@ def load_db():
         df1['Source_Plan'] = 'GE06'
         main_df = df1
 
-    # تحميل ملف FM (GE84)
     target_fm = "FM.xlsx"
     if os.path.exists(target_fm):
         df2 = pd.read_excel(target_fm)
@@ -193,7 +197,6 @@ def load_db():
                 main_df['lon_dec'] = coords_split[0].apply(dms_to_decimal)
                 main_df['lat_dec'] = coords_split[1].apply(dms_to_decimal)
         
-        # تنظيف الترددات للبحث الرقمي
         if 'Assigned Frequency' in main_df.columns:
             def clean_freq(f):
                 try:
@@ -208,63 +211,58 @@ def load_db():
 def engine_v18_5(q, data):
     q_low = q.lower().strip()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
+    
+    # تحديد الدول
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))[:4]
     
     if not selected_adms: return None, [], "Please specify a country / برجاء تحديد الدولة", 0, False
 
-    # منطق الفرز بناءً على الخطة أو التردد أو الخدمة
+    # 1. منطق تحديد الاتفاقية (Force Filter)
     filter_plan = None
     if any(x in q_low for x in SYNONYMS['GE06_KEY']): filter_plan = 'GE06'
     elif any(x in q_low for x in SYNONYMS['GE84_KEY']): filter_plan = 'GE84'
 
-    # استخراج الترددات من السؤال للفلترة الذكية
-    freq_found = re.findall(r"(\d+\.?\d*)", q_low)
-    freq_nums = [float(f) for f in freq_found if 80 <= float(f) <= 900]
-
-    excluded_codes = []
-    found_codes = re.findall(r'\b[a-z][0-9]{2}\b', q_low)
-    explicit_codes = [c.upper() for c in found_codes]
-    is_exclusion = any(x in q_low for x in SYNONYMS['EXCEPT_KEY'])
+    # 2. منطق التفرقة بين Assignments و Allotments
+    is_allot_only = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
+    is_assig_only = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
     
-    if is_exclusion:
-        if explicit_codes: excluded_codes.extend(explicit_codes)
+    comp_type = "Total"
+    if is_allot_only and not is_assig_only: comp_type = "Allotments"
+    elif is_assig_only and not is_allot_only: comp_type = "Assignments"
+
+    # 3. تحديد نوع الخدمة بناءً على الخطة
+    wanted_codes = []
+    if filter_plan == 'GE06':
+        wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV']
+    elif filter_plan == 'GE84':
+        wanted_codes = CAT_MAP['FM']
+    else:
+        # لو ما حددش خطة، نشغل الفلتر العام بناءً على الكلمات المفتاحية
+        if any(x in q_low for x in SYNONYMS['DAB_KEY']): wanted_codes.extend(CAT_MAP['DAB'])
+        if any(x in q_low for x in SYNONYMS['TV_KEY']): wanted_codes.extend(CAT_MAP['TV'])
+        if any(x in q_low for x in SYNONYMS['FM_KEY']): wanted_codes.extend(CAT_MAP['FM'])
+        if not wanted_codes: wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
+
+    # استثناءات
+    excluded_codes = []
+    if any(x in q_low for x in SYNONYMS['EXCEPT_KEY']):
         if any(x in q_low for x in SYNONYMS['DAB_KEY']): excluded_codes.extend(CAT_MAP['DAB'])
         if any(x in q_low for x in SYNONYMS['TV_KEY']): excluded_codes.extend(CAT_MAP['TV'])
-        if any(x in q_low for x in SYNONYMS['FM_KEY']): excluded_codes.extend(CAT_MAP['FM'])
 
-    wanted_codes = []
-    # تحديد الكود بناءً على نوع الخدمة المذكور
-    if any(x in q_low for x in SYNONYMS['DAB_KEY']) and not is_exclusion: wanted_codes.extend(CAT_MAP['DAB'])
-    elif any(x in q_low for x in SYNONYMS['TV_KEY']) and not is_exclusion: wanted_codes.extend(CAT_MAP['TV'])
-    elif any(x in q_low for x in SYNONYMS['FM_KEY']) and not is_exclusion: wanted_codes.extend(CAT_MAP['FM'])
-    
-    # لو السؤال عن تردد معين، نحدد الكود بناءً على نطاق التردد
-    if not wanted_codes and freq_nums:
-        f = freq_nums[0]
-        if 87.5 <= f <= 108: wanted_codes.extend(CAT_MAP['FM'])
-        elif 174 <= f <= 862: wanted_codes.extend(CAT_MAP['TV'] + CAT_MAP['DAB'])
-
-    if not wanted_codes: 
-        wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
-    
     final_codes = [c for c in wanted_codes if c not in excluded_codes]
+    
     reports = []; final_df = pd.DataFrame()
-    comp_type = "Assignments" if any(x in q_low for x in SYNONYMS['ASSIG_KEY']) else ("Allotments" if any(x in q_low for x in SYNONYMS['ALLOT_KEY']) else "Total")
 
     for adm in selected_adms:
         adm_full = data[data['Adm'] == adm].copy()
         
-        # تطبيق فلتر الخطة (GE06/GE84) لو وجد
+        # تطبيق فلتر الاتفاقية
         if filter_plan:
             adm_full = adm_full[adm_full['Source_Plan'] == filter_plan]
             
         adm_filtered = adm_full[adm_full['Notice Type'].isin(final_codes)]
         
-        # فلترة إضافية لو فيه رقم تردد محدد
-        if freq_nums:
-            adm_filtered = adm_filtered[adm_filtered['freq_val'].isin(freq_nums)]
-
         a_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ALLOT)])
         
@@ -273,15 +271,25 @@ def engine_v18_5(q, data):
             'TV': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['TV'])]),
             'FM': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['FM'])])
         }
+        
+        # تحديد القيمة الراجعة بناءً على طلب المستخدم (Total, Assig, or Allot)
+        res_val = a_count + l_count
+        if comp_type == "Assignments": res_val = a_count
+        elif comp_type == "Allotments": res_val = l_count
+
         reports.append({
             "Adm": adm, "Total": a_count + l_count, "Assignments": a_count, "Allotments": l_count,
-            "Stats": stats, "DisplayName": COUNTRY_DISPLAY[adm]['ar'] if is_ar else COUNTRY_DISPLAY[adm]['en']
+            "ResultValue": res_val, "Stats": stats, 
+            "DisplayName": COUNTRY_DISPLAY[adm]['ar'] if is_ar else COUNTRY_DISPLAY[adm]['en']
         })
         final_df = pd.concat([final_df, adm_filtered], ignore_index=True)
 
+    # بناء رسالة الرد
     msg = ""
     for r in reports:
-        msg += f"{r['DisplayName']}: {r[comp_type]} records found. " if not is_ar else f"{r['DisplayName']}: تم العثور على {r[comp_type]} سجل. "
+        unit = "سجل" if is_ar else "records"
+        label = comp_type if not is_ar else ("تخصيصات" if comp_type=="Assignments" else ("توزيعات" if comp_type=="Allotments" else "إجمالي"))
+        msg += f"{r['DisplayName']}: {r['ResultValue']} {label} {unit}. "
 
     return final_df, reports, msg, 100, True
 
@@ -307,12 +315,9 @@ if query and db is not None:
     
     if success:
         st.success(msg)
-        
-        # Audio Result Control
         if st.button("🔊 Play Results Summary"):
             speak_text(msg)
         
-        # Metrics Display
         m_cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with m_cols[i]:
@@ -320,8 +325,6 @@ if query and db is not None:
                 st.metric(r['DisplayName'], f"Total: {r['Total']}", f"A:{r['Assignments']} | L:{r['Allotments']}")
 
         st.divider()
-        
-        # Large Map
         st.subheader("📡 Geospatial Spectrum Distribution")
         if not res_df.empty and 'lat_dec' in res_df.columns:
             map_df = res_df.dropna(subset=['lat_dec', 'lon_dec'])
@@ -332,8 +335,6 @@ if query and db is not None:
             st.plotly_chart(fig_map, use_container_width=True)
 
         st.divider()
-
-        # Analytics
         st.subheader("📊 Service Analytics")
         chart_col1, chart_col2 = st.columns(2)
         with chart_col1:
