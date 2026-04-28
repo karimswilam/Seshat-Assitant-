@@ -23,7 +23,7 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v18.5", page_icon="📡")
+st.set_page_config(layout="wide", page_title="Se-Chat التنسيق الدولي للخدمات الارضية v18.5", page_icon="📡")
 
 st.markdown("""
     <style>
