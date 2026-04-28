@@ -35,8 +35,8 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Seshat Master Precision v18.5"
-PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
+PROJECT_NAME = "Se-Chat التنسيق الدولي للخدمات الارضية v18.5"
+PROJECT_SLOGAN = "Spectrum Coordination Intelligence & Governance"
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
 with header_col2:
