@@ -25,6 +25,10 @@ except ImportError:
 # --- 1. CONFIG & INTERFACE ---
 st.set_page_config(layout="wide", page_title="Seshat AI v18.5", page_icon="📡")
 
+# التعديل المطلوب: استدعاء logo.jpg ووضعه أعلى اليمين
+if os.path.exists("logo.jpg"):
+    st.sidebar.image("logo.jpg", use_container_width=True)
+
 st.markdown("""
     <style>
     .flag-container { display: flex; justify-content: center; margin-bottom: 10px; }
