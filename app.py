@@ -36,6 +36,17 @@ st.markdown("""
         padding: 20px; border: 2px solid #1E3A8A; border-radius: 10px; 
         background-color: #F0F4F8; margin: 20px 0;
     }
+    /* Style for clickable flags */
+    .clickable-flag {
+        cursor: pointer;
+        transition: transform 0.2s;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    .clickable-flag:hover {
+        transform: scale(1.1);
+        border-color: #1E3A8A;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -280,18 +291,45 @@ def engine_v18_6(q, data):
 # --- 5. UI FLOW ---
 db = load_db()
 
+# --- Search & Inputs ---
 with st.container(border=True):
     col_v1, col_v2, col_v3 = st.columns([1, 4, 1])
     with col_v1:
         voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v186_mic")
+    
     input_val = speech_to_text_robust(voice_raw) if voice_raw else ""
+    
+    # Session state for query to handle flag clicks
+    if 'query_input' not in st.session_state:
+        st.session_state.query_input = ""
+    
+    if input_val:
+        st.session_state.query_input = input_val
+
     with col_v2:
-        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=input_val)
+        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=st.session_state.query_input, key="main_input")
+        st.session_state.query_input = query # Keep sync
     with col_v3:
         if st.button("👂 Listen"): speak_text(query)
 
-if query and db is not None:
-    res_df, reports, msg, conf, success = engine_v18_6(query, db)
+# --- ADDED VALUE: QUICK ACCESS FLAGS LIST ---
+st.markdown('<p style="color: #475569; font-weight: bold; margin-bottom: 5px;">Quick Access / الدخول السريع:</p>', unsafe_allow_html=True)
+flag_cols = st.columns(len(FLAGS))
+for i, (code, url) in enumerate(FLAGS.items()):
+    with flag_cols[i]:
+        # Using a button with image logic to trigger the query
+        if st.button(f"{COUNTRY_DISPLAY[code]['ar']}", key=f"btn_{code}"):
+            st.session_state.query_input = COUNTRY_DISPLAY[code]['en']
+            st.rerun()
+        st.markdown(f'<div style="text-align:center;"><img src="{url}" style="width:50px; border-radius:3px;"></div>', unsafe_allow_html=True)
+
+st.divider()
+
+# --- Engine Execution ---
+active_query = st.session_state.query_input
+
+if active_query and db is not None:
+    res_df, reports, msg, conf, success = engine_v18_6(active_query, db)
     
     if not success:
         st.markdown(f'<div class="centered-msg">{msg}</div>', unsafe_allow_html=True)
