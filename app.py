@@ -37,26 +37,7 @@ st.markdown("""
         background-color: #F0F4F8; margin: 20px 0;
     }
     /* Chiclet Slicer Style */
-    .slicer-box {
-        display: flex;
-        overflow-x: auto;
-        gap: 15px;
-        padding: 15px;
-        background: #f1f5f9;
-        border-radius: 15px;
-        margin-bottom: 20px;
-    }
-    .chiclet {
-        min-width: 130px;
-        text-align: center;
-        background: white;
-        padding: 10px;
-        border-radius: 10px;
-        cursor: pointer;
-        border: 2px solid transparent;
-        transition: 0.3s;
-    }
-    .chiclet:hover { border-color: #1E3A8A; }
+    .slicer-header { color: #1E3A8A; font-weight: bold; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -184,7 +165,7 @@ def speak_text(text):
         data = loop.run_until_complete(generate_audio_stream(text))
         if data: st.audio(data, format="audio/mp3", autoplay=True)
 
-# --- 4. ENGINE CORE V18.6 ---
+# --- 4. ENGINE CORE ---
 @st.cache_data
 def load_db():
     main_df = pd.DataFrame()
@@ -225,27 +206,22 @@ def load_db():
 def engine_v18_6(q, data):
     q_low = q.lower().strip()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
-    
-    # 1. Stopping Condition: Check Frequency Range
     freq_numbers = re.findall(r"(\d+\.?\d*)", q_low)
     if any(key in q_low for key in ['تردد', 'frequency']):
         if len(freq_numbers) == 1:
             return None, [], "Please write the frequency range / برجاء كتابة نطاق التردد (Start and Stop)", 0, False
 
-    # 2. Identify Countries
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))
     
     if not selected_adms:
         return None, [], "Country is not in database / هذه الدولة غير موجودة بقاعدة البيانات", 0, False
 
-    # 3. Frequency Band Logic
     f_start, f_stop = (None, None)
     if len(freq_numbers) >= 2:
         nums = sorted([float(n) for n in freq_numbers])
         f_start, f_stop = nums[0], nums[1]
 
-    # 4. Filter Logic
     filter_plan = None
     if any(x in q_low for x in SYNONYMS['GE06_KEY']): filter_plan = 'GE06'
     elif any(x in q_low for x in SYNONYMS['GE84_KEY']): filter_plan = 'GE84'
@@ -263,23 +239,16 @@ def engine_v18_6(q, data):
         wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
 
     reports = []; final_df = pd.DataFrame()
-    
     for adm in selected_adms:
         adm_full = data[data['Adm'] == adm].copy()
         if filter_plan: adm_full = adm_full[adm_full['Source_Plan'] == filter_plan]
         if f_start and f_stop: adm_full = adm_full[(adm_full['freq_val'] >= f_start) & (adm_full['freq_val'] <= f_stop)]
-        
         adm_filtered = adm_full[adm_full['Notice Type'].isin(wanted_codes)]
-        
         a_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ALLOT)])
         
-        # Zero Result Justification
         if (a_count + l_count) == 0:
-            justification = f"{COUNTRY_DISPLAY[adm]['en']} has no "
-            if filter_plan == 'GE84' and is_allot_only: justification += "allotments in GE84 plan."
-            elif is_allot_only and any(x in q_low for x in SYNONYMS['DAB_KEY']): justification += "DAB allotments registered (GS2/DS2)."
-            else: justification += "records matching your search criteria."
+            justification = f"{COUNTRY_DISPLAY[adm]['en']} has no records matching."
             if len(selected_adms) == 1: return None, [], justification, 0, False
 
         reports.append({
@@ -301,46 +270,53 @@ def engine_v18_6(q, data):
 # --- 5. UI FLOW ---
 db = load_db()
 
-# --- NEW: CHICLET SLICER SECTION ---
-# This part is added BEFORE the search bar as requested.
-st.write("### 🌐 Select Country / اختر الدولة")
-slicer_cols = st.columns(len(FLAGS))
-chiclet_query = ""
+# Initialize session state for query if not exists
+if 'query_input' not in st.session_state:
+    st.session_state.query_input = ""
 
-for i, (code, flag_url) in enumerate(FLAGS.items()):
-    with slicer_cols[i]:
-        # If chiclet is clicked, we set the chiclet_query to the country name to trigger the original logic
-        if st.button(f"{code}", key=f"chic_{code}"):
-            chiclet_query = COUNTRY_DISPLAY[code]['en']
+# --- CHICLET SLICER LOGIC ---
+# Show slicer ONLY if query is empty
+if not st.session_state.query_input:
+    st.markdown('<p class="slicer-header">🌐 Quick Select Country / اختيار سريع للدولة</p>', unsafe_allow_html=True)
+    slicer_cols = st.columns(len(FLAGS))
+    for i, (code, flag_url) in enumerate(FLAGS.items()):
+        with slicer_cols[i]:
+            if st.button(f"{code} 🚩", key=f"btn_{code}"):
+                st.session_state.query_input = COUNTRY_DISPLAY[code]['en']
+                st.rerun()
 
-st.divider()
-
+# --- Search Bar & Voice ---
 with st.container(border=True):
     col_v1, col_v2, col_v3 = st.columns([1, 4, 1])
     with col_v1:
-        voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v186_mic")
+        voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v187_mic")
     
-    # Logic to handle voice, text, or chiclet
-    input_val = speech_to_text_robust(voice_raw) if voice_raw else ""
-    
+    # If voice is used, update the query input
+    if voice_raw:
+        voice_text = speech_to_text_robust(voice_raw)
+        if voice_text:
+            st.session_state.query_input = voice_text
+
     with col_v2:
-        # Priority: Voice > Chiclet > Text Input
-        final_query_val = input_val if input_val else chiclet_query
-        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=final_query_val)
-        
+        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=st.session_state.query_input)
+        # Update session state if user types manually
+        if query != st.session_state.query_input:
+            st.session_state.query_input = query
+
     with col_v3:
         if st.button("👂 Listen"):
             speak_text(query)
 
-# --- 6. EXECUTION & DASHBOARD (LOGIC UNTOUCHED) ---
+# --- 6. EXECUTION & DASHBOARD ---
 if query and db is not None:
     res_df, reports, msg, conf, success = engine_v18_6(query, db)
     
     if not success:
         st.markdown(f'<div class="centered-msg">{msg}</div>', unsafe_allow_html=True)
+        if st.button("🔄 Clear Search"):
+            st.session_state.query_input = ""
+            st.rerun()
     else:
-        # Hide Chiclet Slicer area if it's a voice query (optional, based on your request)
-        # However, the original results display logic remains exactly as you wrote it.
         st.success(msg)
         if st.button("🔊 Play Results"):
             speak_text(msg)
@@ -383,3 +359,8 @@ if query and db is not None:
 
         with st.expander("Detailed Technical Records"): 
             st.dataframe(res_df, use_container_width=True)
+        
+        # Add a clear button to go back to Slicer
+        if st.button("🗑️ Clear Result & Show Slicer"):
+            st.session_state.query_input = ""
+            st.rerun()
