@@ -23,53 +23,30 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Se-Chat التنسيق الدولي للخدمات الارضية v18.5", page_icon="📡")
+st.set_page_config(layout="wide", page_title="Seshat AI v18.5", page_icon="📡")
 
-# التعديل: إضافة تنسيق الخلفية Navy وتنسيق الـ Banner من ملف mytheme.json
 st.markdown("""
     <style>
-    /* تطبيق خلفية الـ Navy والألوان من mytheme.json */
-    [data-testid="stAppViewContainer"] {
-        background-color: #161219;
-        color: #CCCCCC;
-    }
-    [data-testid="stHeader"] {
-        background-color: rgba(0,0,0,0);
-    }
-    
-    /* توضيح نصوص العناوين والبطاقات */
-    h1, h2, h3, h4, h5, h6, p, label, .stMetric label {
-        color: #EDEAF2 !important;
-    }
-    
     .flag-container { display: flex; justify-content: center; margin-bottom: 10px; }
-    .flag-img { width: 120px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
-    [data-testid="stMetricValue"] { font-size: 24px !important; color: #BC7AF9 !important; }
-    .stButton button { width: 100%; border-radius: 20px; background-color: #BC7AF9; color: white; border: none; }
-    
-    /* تحسين شكل الـ Expander والجداول في الثيم الغامق */
-    .styled-table { background-color: #2E2638; border-radius: 10px; }
+    .flag-img { width: 120px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    [data-testid="stMetricValue"] { font-size: 24px !important; }
+    .stButton button { width: 100%; border-radius: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-# التعديل: إضافة الـ Banner في أعلى الصفحة
-if os.path.exists("logo.png"):
-    st.image("logo.png", use_container_width=True)
-
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Se-Chat التنسيق الدولي للخدمات الارضية v18.5"
-PROJECT_SLOGAN = "Spectrum Coordination Intelligence & Governance"
+PROJECT_NAME = "Seshat Master Precision v18.5"
+PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
 with header_col2:
     if os.path.exists(LOGO_FILE):
         st.image(LOGO_FILE, width=120)
-    # تعديل لون النص هنا ليتناسب مع الخلفية الجديدة
-    st.markdown(f'<div style="text-align: center;"><h1 style="color: #BC7AF9; margin-bottom: 0;">{PROJECT_NAME}</h1><p style="color: #CCCCCC; font-size: 16px;">{PROJECT_SLOGAN}</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="text-align: center;"><h1 style="color: #1E3A8A; margin-bottom: 0;">{PROJECT_NAME}</h1><p style="color: #475569; font-size: 16px;">{PROJECT_SLOGAN}</p></div>', unsafe_allow_html=True)
 
 st.divider()
 
-# --- 2. FIXED ENGINEERING LOGIC (باقي الكود كما هو تماماً دون تغيير) ---
+# --- 2. FIXED ENGINEERING LOGIC ---
 FLAGS = {
     'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
     'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
@@ -112,9 +89,7 @@ SYNONYMS = {
     'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'without', 'excluding']
 }
 
-# (يستمر باقي الكود في العمل بشكل طبيعي...)
-# [تكملة الدوال engine_v18_5 و load_db و speech_to_text_robust تظل كما هي]
-
+# --- 3. UTILITIES & VOICE ENGINE ---
 def dms_to_decimal(dms_str):
     try:
         if pd.isna(dms_str) or not isinstance(dms_str, str): return None
@@ -181,6 +156,7 @@ def speak_text(text):
         if data:
             st.audio(data, format="audio/mp3", autoplay=True)
 
+# --- 4. ENGINE CORE ---
 @st.cache_data
 def load_db():
     files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
@@ -257,6 +233,7 @@ def engine_v18_5(q, data):
 
     return final_df, reports, msg, 100, True
 
+# --- 5. UI FLOW ---
 db = load_db()
 
 with st.container(border=True):
@@ -278,9 +255,12 @@ if query and db is not None:
     
     if success:
         st.success(msg)
+        
+        # Audio Result Control
         if st.button("🔊 Play Results Summary"):
             speak_text(msg)
         
+        # Metrics Display
         m_cols = st.columns(len(reports))
         for i, r in enumerate(reports):
             with m_cols[i]:
@@ -288,23 +268,27 @@ if query and db is not None:
                 st.metric(r['DisplayName'], f"Total: {r['Total']}", f"A:{r['Assignments']} | L:{r['Allotments']}")
 
         st.divider()
+        
+        # Large Map
         st.subheader("📡 Geospatial Spectrum Distribution")
         if not res_df.empty and 'lat_dec' in res_df.columns:
             map_df = res_df.dropna(subset=['lat_dec', 'lon_dec'])
             fig_map = px.scatter_mapbox(map_df, lat="lat_dec", lon="lon_dec", color="Adm", 
                                        hover_name="Notice Type", zoom=3, height=600,
-                                       mapbox_style="carto-dark") # تم تعديل الستايل ليكون غامقاً
+                                       mapbox_style="carto-positron")
             fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
             st.plotly_chart(fig_map, use_container_width=True)
 
         st.divider()
+
+        # Analytics
         st.subheader("📊 Service Analytics")
         chart_col1, chart_col2 = st.columns(2)
         with chart_col1:
             chart_data = pd.DataFrame(reports)
             fig_bar = px.bar(chart_data, x="DisplayName", y=["Assignments", "Allotments"], 
                             barmode="group", title="Assignments vs Allotments",
-                            color_discrete_sequence=['#BC7AF9', '#19A7CE']) # ألوان من ملف الـ JSON
+                            color_discrete_sequence=['#1E3A8A', '#3B82F6'])
             st.plotly_chart(fig_bar, use_container_width=True)
 
         with chart_col2:
