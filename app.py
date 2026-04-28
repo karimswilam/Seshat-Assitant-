@@ -23,11 +23,7 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Seshat AI v18.5", page_icon="📡")
-
-# التعديل المطلوب: استدعاء logo.jpg ووضعه أعلى اليمين
-if os.path.exists("logo.jpg"):
-    st.sidebar.image("logo.jpg", use_container_width=True)
+st.set_page_config(layout="wide", page_title="Seshat  v18.5", page_icon="📡")
 
 st.markdown("""
     <style>
@@ -39,8 +35,8 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Seshat Master Precision v18.5"
-PROJECT_SLOGAN = "Project BASIRA | Spectrum Intelligence & Governance"
+PROJECT_NAME = "Se-Chat التنسيق الدولي للطيف v18.5"
+PROJECT_SLOGAN = " Spectrum Intelligence & Governance"
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
 with header_col2:
