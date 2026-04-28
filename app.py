@@ -30,22 +30,21 @@ st.markdown("""
     .flag-container { display: flex; justify-content: center; margin-bottom: 10px; }
     .flag-img { width: 120px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     [data-testid="stMetricValue"] { font-size: 24px !important; }
-    .stButton button { width: 100%; border-radius: 20px; }
+    .stButton button { width: 100%; border-radius: 10px; }
     .centered-msg { 
         text-align: center; font-size: 20px; color: #1E3A8A; 
         padding: 20px; border: 2px solid #1E3A8A; border-radius: 10px; 
         background-color: #F0F4F8; margin: 20px 0;
     }
-    /* Style for clickable flags */
-    .clickable-flag {
-        cursor: pointer;
-        transition: transform 0.2s;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-    }
-    .clickable-flag:hover {
-        transform: scale(1.1);
-        border-color: #1E3A8A;
+    /* Horizontal Scroll for Flags */
+    .scroll-container {
+        display: flex;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding: 10px;
+        gap: 15px;
+        background: #f8f9fa;
+        border-radius: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -62,20 +61,54 @@ with header_col2:
 
 st.divider()
 
-# --- 2. FIXED ENGINEERING LOGIC ---
-FLAGS = {
-    'EGY': "https://flagcdn.com/w640/eg.png", 'ARS': "https://flagcdn.com/w640/sa.png",
-    'TUR': "https://flagcdn.com/w640/tr.png", 'CYP': "https://flagcdn.com/w640/cy.png",
-    'GRC': "https://flagcdn.com/w640/gr.png", 'ISR': "https://flagcdn.com/w640/il.png"
+# --- 2. EXTENDED DATA FOR ALL ADMs ---
+# القائمة الكاملة التي زودتنا بها
+ADM_LIST = {
+    'AFG': 'Afghanistan', 'AFS': 'South Africa', 'AGL': 'Angola', 'ALB': 'Albania', 'ALG': 'Algeria',
+    'AND': 'Andorra', 'ARG': 'Argentine', 'ARM': 'Armenia', 'ARS': 'Saudi Arabia', 'ATG': 'Antigua and Barbuda',
+    'AUS': 'Australia', 'AUT': 'Austria', 'AZE': 'Azerbaijan', 'B': 'Brazil', 'BAH': 'Bahamas',
+    'BDI': 'Burundi', 'BEL': 'Belgium', 'BEN': 'Benin', 'BFA': 'Burkina Faso', 'BGD': 'Bangladesh',
+    'BHR': 'Bahrain', 'BIH': 'Bosnia and Herzegovina', 'BLR': 'Belarus', 'BLZ': 'Belize', 'BOL': 'Bolivia',
+    'BOT': 'Botswana', 'BRB': 'Barbados', 'BRM': 'Myanmar', 'BRU': 'Brunei', 'BTN': 'Bhutan',
+    'BUL': 'Bulgaria', 'CAF': 'Central African Republic', 'CAN': 'Canada', 'CBG': 'Cambodia', 'CHL': 'Chile',
+    'CHN': 'China', 'CLM': 'Colombia', 'CLN': 'Sri Lanka', 'CME': 'Cameroon', 'COD': 'DR Congo',
+    'COG': 'Congo', 'COM': 'Comoros', 'CPV': 'Cabo Verde', 'CTI': 'Côte d\'Ivoire', 'CTR': 'Costa Rica',
+    'CUB': 'Cuba', 'CVA': 'Vatican', 'CYP': 'Cyprus', 'CZE': 'Czech Republic', 'D': 'Germany',
+    'DJI': 'Djibouti', 'DMA': 'Dominica', 'DNK': 'Denmark', 'DOM': 'Dominican Republic', 'E': 'Spain',
+    'EGY': 'Egypt', 'EQA': 'Ecuador', 'ERI': 'Eritrea', 'EST': 'Estonia', 'ETH': 'Ethiopia',
+    'F': 'France', 'FIN': 'Finland', 'FJI': 'Fiji', 'FSM': 'Micronesia', 'G': 'United Kingdom',
+    'GAB': 'Gabon', 'GEO': 'Georgia', 'GHA': 'Ghana', 'GMB': 'Gambia', 'GNB': 'Guinea-Bissau',
+    'GNE': 'Equatorial Guinea', 'GRC': 'Greece', 'GRD': 'Grenada', 'GTM': 'Guatemala', 'GUI': 'Guinea',
+    'GUY': 'Guyana', 'HND': 'Honduras', 'HNG': 'Hungary', 'HOL': 'Netherlands', 'HRV': 'Croatia',
+    'HTI': 'Haiti', 'I': 'Italy', 'IND': 'India', 'INS': 'Indonesia', 'IRL': 'Ireland',
+    'IRN': 'Iran', 'IRQ': 'Iraq', 'ISL': 'Iceland', 'ISR': 'Israel', 'J': 'Japan',
+    'JMC': 'Jamaica', 'JOR': 'Jordan', 'KAZ': 'Kazakhstan', 'KEN': 'Kenya', 'KGZ': 'Kyrgyzstan',
+    'KIR': 'Kiribati', 'KNA': 'Saint Kitts and Nevis', 'KOR': 'Korea', 'KRE': 'North Korea', 'KWT': 'Kuwait',
+    'LAO': 'Lao', 'LBN': 'Lebanon', 'LBR': 'Liberia', 'LBY': 'Libya', 'LCA': 'Saint Lucia',
+    'LIE': 'Liechtenstein', 'LSO': 'Lesotho', 'LTU': 'Lithuania', 'LUX': 'Luxembourg', 'LVA': 'Latvia',
+    'MAU': 'Mauritius', 'MCO': 'Monaco', 'MDA': 'Moldova', 'MDG': 'Madagascar', 'MEX': 'Mexico',
+    'MHL': 'Marshall Islands', 'MKD': 'North Macedonia', 'MLA': 'Malaysia', 'MLD': 'Maldives', 'MLI': 'Mali',
+    'MLT': 'Malta', 'MNE': 'Montenegro', 'MNG': 'Mongolia', 'MOZ': 'Mozambique', 'MRC': 'Morocco',
+    'MTN': 'Mauritania', 'MWI': 'Malawi', 'NCG': 'Nicaragua', 'NGR': 'Niger', 'NIG': 'Nigeria',
+    'NMB': 'Namibia', 'NOR': 'Norway', 'NPL': 'Nepal', 'NRU': 'Nauru', 'NZL': 'New Zealand',
+    'OMA': 'Oman', 'PAK': 'Pakistan', 'PHL': 'Philippines', 'PLW': 'Palau', 'PNG': 'Papua New Guinea',
+    'PNR': 'Panama', 'POL': 'Poland', 'POR': 'Portugal', 'PRG': 'Paraguay', 'PRU': 'Peru',
+    'QAT': 'Qatar', 'ROU': 'Romania', 'RRW': 'Rwanda', 'RUS': 'Russia', 'S': 'Sweden',
+    'SDN': 'Sudan', 'SEN': 'Senegal', 'SEY': 'Seychelles', 'SLM': 'Solomon Islands', 'SLV': 'El Salvador',
+    'SMO': 'Samoa', 'SMR': 'San Marino', 'SNG': 'Singapore', 'SOM': 'Somalia', 'SRB': 'Serbia',
+    'SRL': 'Sierra Leone', 'SSD': 'South Sudan', 'STP': 'Sao Tome and Principe', 'SUI': 'Switzerland', 'SUR': 'Suriname',
+    'SVK': 'Slovakia', 'SVN': 'Slovenia', 'SWZ': 'Eswatini', 'SYR': 'Syria', 'TCD': 'Chad',
+    'TGO': 'Togo', 'THA': 'Thailand', 'TJK': 'Tajikistan', 'TKM': 'Turkmenistan', 'TLS': 'Timor-Leste',
+    'TON': 'Tonga', 'TRD': 'Trinidad and Tobago', 'TUN': 'Tunisia', 'TUR': 'Türkiye', 'TUV': 'Tuvalu',
+    'TZA': 'Tanzania', 'UAE': 'UAE', 'UGA': 'Uganda', 'UKR': 'Ukraine', 'URG': 'Uruguay',
+    'USA': 'USA', 'UZB': 'Uzbekistan', 'VCT': 'Saint Vincent', 'VEN': 'Venezuela', 'VTN': 'Viet Nam',
+    'VUT': 'Vanuatu', 'YEM': 'Yemen', 'ZMB': 'Zambia', 'ZWE': 'Zimbabwe'
 }
 
-COUNTRY_DISPLAY = {
-    'EGY': {'ar': 'مصر', 'en': 'Egypt'},
-    'ARS': {'ar': 'السعودية', 'en': 'Saudi Arabia'},
-    'TUR': {'ar': 'تركيا', 'en': 'Turkey'},
-    'CYP': {'ar': 'قبرص', 'en': 'Cyprus'},
-    'GRC': {'ar': 'اليونان', 'en': 'Greece'},
-    'ISR': {'ar': 'إسرائيل', 'en': 'Israel'}
+# Mapping ITU codes to 2-letter ISO for flags
+ISO_MAP = {
+    'EGY': 'eg', 'ARS': 'sa', 'TUR': 'tr', 'CYP': 'cy', 'GRC': 'gr', 'ISR': 'il', 'USA': 'us', 'F': 'fr', 'D': 'de', 'I': 'it', 'G': 'gb', 'RUS': 'ru', 'UAE': 'ae', 'JOR': 'jo', 'LBN': 'lb', 'QAT': 'qa', 'KWT': 'kw', 'OMA': 'om', 'BHR': 'bh', 'IRQ': 'iq'
+    # سيتم تكملة الباقي ديناميكياً في العرض قدر الإمكان
 }
 
 STRICT_ASSIG = ['T01', 'T03', 'T04', 'GS1', 'DS1', 'GT1', 'DT1', 'G01']
@@ -87,14 +120,10 @@ CAT_MAP = {
     'FM': ['T01','T03','T04']
 }
 
-COUNTRY_MAP = {
-    'EGY': ['egypt', 'egy', 'مصر', 'المصرية', 'المصريه', 'مصرية', 'مصريه', 'قصر', 'متر'],
-    'ARS': ['saudi', 'saudiarabia', 'ars', 'ksa', 'السعودية', 'المملكة', 'المملكه', 'سعودية', 'سعوديه'],
-    'TUR': ['turkey', 'tur', 'تركيا', 'تركي', 'التركية', 'التركيه'],
-    'CYP': ['cyprus', 'cyp', 'قبرص'],
-    'GRC': ['greece', 'grc', 'اليونان'],
-    'ISR': ['israel', 'isr', 'إسرائيل', 'اسرائيل']
-}
+COUNTRY_MAP = {code: [name.lower(), code.lower()] for code, name in ADM_LIST.items()}
+# إضافة الأسماء العربية للدول المشهورة لضمان دقة البحث
+COUNTRY_MAP['EGY'].extend(['مصر', 'المصرية'])
+COUNTRY_MAP['ARS'].extend(['السعودية', 'المملكة'])
 
 SYNONYMS = {
     'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'allot', 'allots'],
@@ -216,26 +245,22 @@ def engine_v18_6(q, data):
     q_low = q.lower().strip()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
     
-    # 1. Stopping Condition: Check Frequency Range
     freq_numbers = re.findall(r"(\d+\.?\d*)", q_low)
     if any(key in q_low for key in ['تردد', 'frequency']):
         if len(freq_numbers) == 1:
-            return None, [], "Please write the frequency range / برجاء كتابة نطاق التردد (Start and Stop)", 0, False
+            return None, [], "Please write the frequency range / برجاء كتابة نطاق التردد", 0, False
 
-    # 2. Identify Countries
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))
     
     if not selected_adms:
-        return None, [], "Country is not in database / هذه الدولة غير موجودة بقاعدة البيانات", 0, False
+        return None, [], "Country is not in database", 0, False
 
-    # 3. Frequency Band Logic
     f_start, f_stop = (None, None)
     if len(freq_numbers) >= 2:
         nums = sorted([float(n) for n in freq_numbers])
         f_start, f_stop = nums[0], nums[1]
 
-    # 4. Filter Logic
     filter_plan = None
     if any(x in q_low for x in SYNONYMS['GE06_KEY']): filter_plan = 'GE06'
     elif any(x in q_low for x in SYNONYMS['GE84_KEY']): filter_plan = 'GE84'
@@ -253,38 +278,28 @@ def engine_v18_6(q, data):
         wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
 
     reports = []; final_df = pd.DataFrame()
-    
     for adm in selected_adms:
         adm_full = data[data['Adm'] == adm].copy()
         if filter_plan: adm_full = adm_full[adm_full['Source_Plan'] == filter_plan]
         if f_start and f_stop: adm_full = adm_full[(adm_full['freq_val'] >= f_start) & (adm_full['freq_val'] <= f_stop)]
         
         adm_filtered = adm_full[adm_full['Notice Type'].isin(wanted_codes)]
-        
         a_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ALLOT)])
         
-        # Zero Result Justification
-        if (a_count + l_count) == 0:
-            justification = f"{COUNTRY_DISPLAY[adm]['en']} has no "
-            if filter_plan == 'GE84' and is_allot_only: justification += "allotments in GE84 plan."
-            elif is_allot_only and any(x in q_low for x in SYNONYMS['DAB_KEY']): justification += "DAB allotments registered (GS2/DS2)."
-            else: justification += "records matching your search criteria."
-            if len(selected_adms) == 1: return None, [], justification, 0, False
-
         reports.append({
             "Adm": adm, "Assignments": a_count, "Allotments": l_count, "Total": a_count + l_count,
             "Stats": {'DAB': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['DAB'])]),
                       'TV': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['TV'])]),
                       'FM': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['FM'])])},
-            "DisplayName": COUNTRY_DISPLAY[adm]['ar'] if is_ar else COUNTRY_DISPLAY[adm]['en']
+            "DisplayName": ADM_LIST[adm]
         })
         final_df = pd.concat([final_df, adm_filtered], ignore_index=True)
 
     msg = ""
     for r in reports:
         val = r[comp_type] if comp_type in r else r['Total']
-        msg += f"{r['DisplayName']}: {val} {comp_type}. "
+        msg += f"{r['DisplayName']}: {val} Records. "
     
     return final_df, reports, msg, 100, True
 
@@ -295,33 +310,35 @@ db = load_db()
 with st.container(border=True):
     col_v1, col_v2, col_v3 = st.columns([1, 4, 1])
     with col_v1:
-        voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v186_mic")
+        voice_raw = mic_recorder(start_prompt="🎤", stop_prompt="🛑", key="v186_mic")
+    
+    if 'query_input' not in st.session_state: st.session_state.query_input = ""
     
     input_val = speech_to_text_robust(voice_raw) if voice_raw else ""
-    
-    # Session state for query to handle flag clicks
-    if 'query_input' not in st.session_state:
-        st.session_state.query_input = ""
-    
-    if input_val:
-        st.session_state.query_input = input_val
+    if input_val: st.session_state.query_input = input_val
 
     with col_v2:
-        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=st.session_state.query_input, key="main_input")
-        st.session_state.query_input = query # Keep sync
+        query = st.text_input("Spectrum Inquiry:", value=st.session_state.query_input, key="main_input")
+        st.session_state.query_input = query
     with col_v3:
-        if st.button("👂 Listen"): speak_text(query)
+        if st.button("👂"): speak_text(query)
 
-# --- ADDED VALUE: QUICK ACCESS FLAGS LIST ---
-st.markdown('<p style="color: #475569; font-weight: bold; margin-bottom: 5px;">Quick Access / الدخول السريع:</p>', unsafe_allow_html=True)
-flag_cols = st.columns(len(FLAGS))
-for i, (code, url) in enumerate(FLAGS.items()):
-    with flag_cols[i]:
-        # Using a button with image logic to trigger the query
-        if st.button(f"{COUNTRY_DISPLAY[code]['ar']}", key=f"btn_{code}"):
-            st.session_state.query_input = COUNTRY_DISPLAY[code]['en']
+# --- NEW: SCROLLING LIST OF ALL ADMs ---
+st.write("🌍 **Quick Country Lookup:**")
+# نستخدم Container مع CSS مخصص للـ Scrolling
+st.markdown('<div class="scroll-container">', unsafe_allow_html=True)
+cols = st.columns(len(ADM_LIST))
+for i, (adm_code, adm_name) in enumerate(ADM_LIST.items()):
+    with cols[i]:
+        # استخراج رمز الدولة للعلم
+        iso = ISO_MAP.get(adm_code, adm_code[:2].lower())
+        flag_url = f"https://flagcdn.com/w80/{iso}.png"
+        
+        # إنشاء زر يحمل صورة العلم واسم الدولة
+        if st.button(f"{adm_name}", key=f"btn_scroll_{adm_code}"):
+            st.session_state.query_input = f"{adm_name} services comparison"
             st.rerun()
-        st.markdown(f'<div style="text-align:center;"><img src="{url}" style="width:50px; border-radius:3px;"></div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -335,45 +352,26 @@ if active_query and db is not None:
         st.markdown(f'<div class="centered-msg">{msg}</div>', unsafe_allow_html=True)
     else:
         st.success(msg)
-        if st.button("🔊 Play Results"): speak_text(msg)
         
-        # Dashboard Logic
         if len(reports) == 1:
-            # Single Country Dashboard: Split by Services
             r = reports[0]
-            st.markdown(f'<div class="flag-container"><img src="{FLAGS.get(r["Adm"])}" class="flag-img"></div>', unsafe_allow_html=True)
+            iso = ISO_MAP.get(r["Adm"], r["Adm"][:2].lower())
+            st.markdown(f'<div class="flag-container"><img src="https://flagcdn.com/w160/{iso}.png" class="flag-img"></div>', unsafe_allow_html=True)
             col1, col2, col3 = st.columns(3)
             col1.metric("DAB", r['Stats']['DAB'])
             col2.metric("TV", r['Stats']['TV'])
             col3.metric("FM", r['Stats']['FM'])
             
-            st.divider()
             c1, c2 = st.columns(2)
             with c1:
-                # Map: Only Assignments for now
-                map_data = res_df[res_df['Notice Type'].isin(STRICT_ASSIG)].dropna(subset=['lat_dec', 'lon_dec'])
+                map_data = res_df.dropna(subset=['lat_dec', 'lon_dec'])
                 if not map_data.empty:
-                    fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Notice Type", zoom=4, height=500, mapbox_style="carto-positron")
-                    st.plotly_chart(fig_map, use_container_width=True)
+                    st.plotly_chart(px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Notice Type", zoom=4, height=400, mapbox_style="carto-positron"), use_container_width=True)
             with c2:
                 svc_data = pd.DataFrame({'Service': list(r['Stats'].keys()), 'Count': list(r['Stats'].values())})
-                st.plotly_chart(px.pie(svc_data, values='Count', names='Service', hole=0.4, title="Service Distribution"), use_container_width=True)
+                st.plotly_chart(px.pie(svc_data, values='Count', names='Service', hole=0.4, title="Distribution"), use_container_width=True)
         else:
-            # Multi-Country Comparison
-            m_cols = st.columns(len(reports))
-            for i, r in enumerate(reports):
-                with m_cols[i]:
-                    st.markdown(f'<div class="flag-container"><img src="{FLAGS.get(r["Adm"])}" class="flag-img"></div>', unsafe_allow_html=True)
-                    st.metric(r['DisplayName'], f"Total: {r['Total']}", f"A:{r['Assignments']} | L:{r['Allotments']}")
-            
-            st.divider()
-            c1, c2 = st.columns(2)
-            with c1:
-                st.plotly_chart(px.bar(pd.DataFrame(reports), x="DisplayName", y=["Assignments", "Allotments"], barmode="group"), use_container_width=True)
-            with c2:
-                map_data = res_df[res_df['Notice Type'].isin(STRICT_ASSIG)].dropna(subset=['lat_dec', 'lon_dec'])
-                if not map_data.empty:
-                    fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Adm", zoom=3, height=500, mapbox_style="carto-positron")
-                    st.plotly_chart(fig_map, use_container_width=True)
+            # Comparison View
+            st.plotly_chart(px.bar(pd.DataFrame(reports), x="DisplayName", y=["Assignments", "Allotments"], barmode="group"), use_container_width=True)
 
-        with st.expander("Detailed Technical Records"): st.dataframe(res_df, use_container_width=True)
+        with st.expander("Technical Records"): st.dataframe(res_df, use_container_width=True)
