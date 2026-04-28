@@ -86,7 +86,9 @@ SYNONYMS = {
     'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'digital audio'],
     'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'مرئيه'],
     'FM_KEY': ['fm', 'radio', 'راديو'],
-    'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'without', 'excluding']
+    'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'without', 'excluding'],
+    'GE06_KEY': ['ge06', 'جي إي 06'],
+    'GE84_KEY': ['ge84', 'جي إي 84']
 }
 
 # --- 3. UTILITIES & VOICE ENGINE ---
@@ -159,23 +161,48 @@ def speak_text(text):
 # --- 4. ENGINE CORE ---
 @st.cache_data
 def load_db():
-    files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
-    target = "Data.xlsx" if "Data.xlsx" in files else (files[0] if files else None)
-    if target:
-        df = pd.read_excel(target)
-        df.columns = df.columns.str.strip()
+    main_df = pd.DataFrame()
+    
+    # تحميل الملف الأساسي (GE06 - TV/DAB)
+    target_main = "Data.xlsx"
+    if os.path.exists(target_main):
+        df1 = pd.read_excel(target_main)
+        df1.columns = df1.columns.str.strip()
+        df1['Source_Plan'] = 'GE06'
+        main_df = df1
+
+    # تحميل ملف FM (GE84)
+    target_fm = "FM.xlsx"
+    if os.path.exists(target_fm):
+        df2 = pd.read_excel(target_fm)
+        df2.columns = df2.columns.str.strip()
+        df2['Source_Plan'] = 'GE84'
+        main_df = pd.concat([main_df, df2], ignore_index=True)
+
+    if not main_df.empty:
         mapping = {'Adm': ['Administration', 'Adm', 'Country'], 'Notice Type': ['Notice Type', 'NT']}
         for std_name, synonyms in mapping.items():
-            for col in df.columns:
+            for col in main_df.columns:
                 if col in synonyms:
-                    df = df.rename(columns={col: std_name})
+                    main_df = main_df.rename(columns={col: std_name})
                     break
-        if 'Geographic Coordinates' in df.columns:
-            coords_split = df['Geographic Coordinates'].astype(str).str.split(expand=True)
+        
+        if 'Geographic Coordinates' in main_df.columns:
+            coords_split = main_df['Geographic Coordinates'].astype(str).str.split(expand=True)
             if coords_split.shape[1] >= 2:
-                df['lon_dec'] = coords_split[0].apply(dms_to_decimal)
-                df['lat_dec'] = coords_split[1].apply(dms_to_decimal)
-        return df
+                main_df['lon_dec'] = coords_split[0].apply(dms_to_decimal)
+                main_df['lat_dec'] = coords_split[1].apply(dms_to_decimal)
+        
+        # تنظيف الترددات للبحث الرقمي
+        if 'Assigned Frequency' in main_df.columns:
+            def clean_freq(f):
+                try:
+                    num = re.findall(r"[-+]?\d*\.\d+|\d+", str(f))
+                    return float(num[0]) if num else 0.0
+                except: return 0.0
+            main_df['freq_val'] = main_df['Assigned Frequency'].apply(clean_freq)
+
+        return main_df
     return None
 
 def engine_v18_5(q, data):
@@ -185,6 +212,15 @@ def engine_v18_5(q, data):
     selected_adms = list(dict.fromkeys(selected_adms))[:4]
     
     if not selected_adms: return None, [], "Please specify a country / برجاء تحديد الدولة", 0, False
+
+    # منطق الفرز بناءً على الخطة أو التردد أو الخدمة
+    filter_plan = None
+    if any(x in q_low for x in SYNONYMS['GE06_KEY']): filter_plan = 'GE06'
+    elif any(x in q_low for x in SYNONYMS['GE84_KEY']): filter_plan = 'GE84'
+
+    # استخراج الترددات من السؤال للفلترة الذكية
+    freq_found = re.findall(r"(\d+\.?\d*)", q_low)
+    freq_nums = [float(f) for f in freq_found if 80 <= float(f) <= 900]
 
     excluded_codes = []
     found_codes = re.findall(r'\b[a-z][0-9]{2}\b', q_low)
@@ -198,10 +234,17 @@ def engine_v18_5(q, data):
         if any(x in q_low for x in SYNONYMS['FM_KEY']): excluded_codes.extend(CAT_MAP['FM'])
 
     wanted_codes = []
+    # تحديد الكود بناءً على نوع الخدمة المذكور
     if any(x in q_low for x in SYNONYMS['DAB_KEY']) and not is_exclusion: wanted_codes.extend(CAT_MAP['DAB'])
     elif any(x in q_low for x in SYNONYMS['TV_KEY']) and not is_exclusion: wanted_codes.extend(CAT_MAP['TV'])
     elif any(x in q_low for x in SYNONYMS['FM_KEY']) and not is_exclusion: wanted_codes.extend(CAT_MAP['FM'])
     
+    # لو السؤال عن تردد معين، نحدد الكود بناءً على نطاق التردد
+    if not wanted_codes and freq_nums:
+        f = freq_nums[0]
+        if 87.5 <= f <= 108: wanted_codes.extend(CAT_MAP['FM'])
+        elif 174 <= f <= 862: wanted_codes.extend(CAT_MAP['TV'] + CAT_MAP['DAB'])
+
     if not wanted_codes: 
         wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
     
@@ -211,10 +254,20 @@ def engine_v18_5(q, data):
 
     for adm in selected_adms:
         adm_full = data[data['Adm'] == adm].copy()
+        
+        # تطبيق فلتر الخطة (GE06/GE84) لو وجد
+        if filter_plan:
+            adm_full = adm_full[adm_full['Source_Plan'] == filter_plan]
+            
         adm_filtered = adm_full[adm_full['Notice Type'].isin(final_codes)]
-        missing_excl = [c for c in explicit_codes if c not in adm_full['Notice Type'].unique()]
+        
+        # فلترة إضافية لو فيه رقم تردد محدد
+        if freq_nums:
+            adm_filtered = adm_filtered[adm_filtered['freq_val'].isin(freq_nums)]
+
         a_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ALLOT)])
+        
         stats = {
             'DAB': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['DAB'])]),
             'TV': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['TV'])]),
@@ -222,8 +275,7 @@ def engine_v18_5(q, data):
         }
         reports.append({
             "Adm": adm, "Total": a_count + l_count, "Assignments": a_count, "Allotments": l_count,
-            "Stats": stats, "Missing": missing_excl,
-            "DisplayName": COUNTRY_DISPLAY[adm]['ar'] if is_ar else COUNTRY_DISPLAY[adm]['en']
+            "Stats": stats, "DisplayName": COUNTRY_DISPLAY[adm]['ar'] if is_ar else COUNTRY_DISPLAY[adm]['en']
         })
         final_df = pd.concat([final_df, adm_filtered], ignore_index=True)
 
