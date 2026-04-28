@@ -31,6 +31,7 @@ st.markdown("""
     .flag-img { width: 120px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     [data-testid="stMetricValue"] { font-size: 24px !important; }
     .stButton button { width: 100%; border-radius: 20px; }
+    .replay-box { background-color: #f8fafc; padding: 10px; border-radius: 10px; border-left: 5px solid #1E3A8A; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -148,13 +149,13 @@ async def generate_audio_stream(text):
         return audio_data
     except: return None
 
-def speak_text(text):
+def speak_text(text, autoplay=False):
     if text:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         data = loop.run_until_complete(generate_audio_stream(text))
         if data:
-            st.audio(data, format="audio/mp3", autoplay=True)
+            st.audio(data, format="audio/mp3", autoplay=autoplay)
 
 # --- 4. ENGINE CORE ---
 @st.cache_data
@@ -237,28 +238,29 @@ def engine_v18_5(q, data):
 db = load_db()
 
 with st.container(border=True):
-    col_v1, col_v2, col_v3 = st.columns([1, 4, 1])
+    col_v1, col_v2 = st.columns([1, 5])
     with col_v1:
         voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v185_mic")
     
     input_val = speech_to_text_robust(voice_raw) if voice_raw else ""
     
     with col_v2:
-        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=input_val)
-    
-    with col_v3:
-        if st.button("👂 Listen"):
-            speak_text(query)
+        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=input_val, key="query_input")
 
+# Logic: Question Replay (Auto-play when query changes)
 if query and db is not None:
+    st.markdown(f'<div class="replay-box">🔈 <b>Question Replay:</b> {query}</div>', unsafe_allow_html=True)
+    speak_text(query, autoplay=True) # إعادة قراءة السؤال بصوت AI فوراً
+    
     res_df, reports, msg, conf, success = engine_v18_5(query, db)
     
     if success:
+        st.divider()
         st.success(msg)
         
         # Audio Result Control
         if st.button("🔊 Play Results Summary"):
-            speak_text(msg)
+            speak_text(msg, autoplay=True)
         
         # Metrics Display
         m_cols = st.columns(len(reports))
