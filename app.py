@@ -27,8 +27,11 @@ st.set_page_config(layout="wide", page_title="Se-Chat v18.7", page_icon="📡")
 
 st.markdown("""
     <style>
-    .flag-container { display: flex; justify-content: center; margin-bottom: 10px; }
-    .flag-img { width: 120px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .flag-container { display: flex; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
+    .flag-card { cursor: pointer; text-align: center; transition: transform 0.2s; }
+    .flag-card:hover { transform: scale(1.1); }
+    .flag-img { width: 100px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); border: 2px solid transparent; }
+    .flag-active { border: 3px solid #1E3A8A !important; }
     [data-testid="stMetricValue"] { font-size: 24px !important; }
     .stButton button { width: 100%; border-radius: 20px; }
     .centered-msg { 
@@ -36,14 +39,18 @@ st.markdown("""
         padding: 20px; border: 2px solid #1E3A8A; border-radius: 10px; 
         background-color: #F0F4F8; margin: 20px 0;
     }
-    /* Chiclet Slicer Style */
-    .slicer-header { color: #1E3A8A; font-weight: bold; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
 LOGO_FILE = "Designer.png" 
 PROJECT_NAME = "Se-Chat التنسيق الدولي للطيف v18.7"
-PROJECT_SLOGAN = " Spectrum Intelligence & Governance"
+PROJECT_SLOGAN = "Spectrum Intelligence & Governance | International Coordination"
+
+# Initialize Session State
+if 'selected_country' not in st.session_state:
+    st.session_state.selected_country = None
+if 'query_input' not in st.session_state:
+    st.session_state.query_input = ""
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
 with header_col2:
@@ -95,7 +102,7 @@ SYNONYMS = {
     'FM_KEY': ['fm', 'radio', 'راديو'],
     'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'without', 'excluding'],
     'GE06_KEY': ['ge06', 'geneva06', 'geneva 06', 'geneva o 6', 'جنيف 06', 'جي إي 06', 'ge06d'],
-    'GE84_KEY': ['ge84', 'geneva84', 'geneva 84', 'جنيف 84', 'جي إي 84', 'اربعة وثمانين', '84']
+    'GE84_KEY': ['ge84', 'geneva84', 'geneva 84', 'جنيف 84', 'اربعة وثمانين', '84']
 }
 
 # --- 3. UTILITIES ---
@@ -165,7 +172,7 @@ def speak_text(text):
         data = loop.run_until_complete(generate_audio_stream(text))
         if data: st.audio(data, format="audio/mp3", autoplay=True)
 
-# --- 4. ENGINE CORE ---
+# --- 4. ENGINE CORE V18.7 ---
 @st.cache_data
 def load_db():
     main_df = pd.DataFrame()
@@ -203,17 +210,21 @@ def load_db():
         return main_df
     return None
 
-def engine_v18_6(q, data):
+def engine_v18_7(q, data):
     q_low = q.lower().strip()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
+    
     freq_numbers = re.findall(r"(\d+\.?\d*)", q_low)
     if any(key in q_low for key in ['تردد', 'frequency']):
         if len(freq_numbers) == 1:
             return None, [], "Please write the frequency range / برجاء كتابة نطاق التردد (Start and Stop)", 0, False
 
+    # Identify Countries (from query or session state)
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
-    selected_adms = list(dict.fromkeys(selected_adms))
+    if not selected_adms and st.session_state.selected_country:
+        selected_adms = [st.session_state.selected_country]
     
+    selected_adms = list(dict.fromkeys(selected_adms))
     if not selected_adms:
         return None, [], "Country is not in database / هذه الدولة غير موجودة بقاعدة البيانات", 0, False
 
@@ -234,9 +245,7 @@ def engine_v18_6(q, data):
     if any(x in q_low for x in SYNONYMS['DAB_KEY']): wanted_codes.extend(CAT_MAP['DAB'])
     if any(x in q_low for x in SYNONYMS['TV_KEY']): wanted_codes.extend(CAT_MAP['TV'])
     if any(x in q_low for x in SYNONYMS['FM_KEY']): wanted_codes.extend(CAT_MAP['FM'])
-    
-    if not wanted_codes: 
-        wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
+    if not wanted_codes: wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
 
     reports = []; final_df = pd.DataFrame()
     for adm in selected_adms:
@@ -247,10 +256,6 @@ def engine_v18_6(q, data):
         a_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ALLOT)])
         
-        if (a_count + l_count) == 0:
-            justification = f"{COUNTRY_DISPLAY[adm]['en']} has no records matching."
-            if len(selected_adms) == 1: return None, [], justification, 0, False
-
         reports.append({
             "Adm": adm, "Assignments": a_count, "Allotments": l_count, "Total": a_count + l_count,
             "Stats": {'DAB': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['DAB'])]),
@@ -270,61 +275,63 @@ def engine_v18_6(q, data):
 # --- 5. UI FLOW ---
 db = load_db()
 
-# Initialize session state for query if not exists
-if 'query_input' not in st.session_state:
-    st.session_state.query_input = ""
+# A. FLAG SELECTION DASHBOARD (Sticky)
+st.markdown("### 🌍 Country Selection Dashboard")
+flag_cols = st.columns(len(FLAGS))
+for i, (code, url) in enumerate(FLAGS.items()):
+    with flag_cols[i]:
+        # استخدام Button بدلاً من HTML لجعل التفاعل أسهل في Streamlit
+        if st.button(f"{COUNTRY_DISPLAY[code]['en']}", key=f"btn_{code}"):
+            st.session_state.selected_country = code
+            st.session_state.query_input = f"Show me {COUNTRY_DISPLAY[code]['en']}"
 
-# --- CHICLET SLICER LOGIC ---
-# Show slicer ONLY if query is empty
-if not st.session_state.query_input:
-    st.markdown('<p class="slicer-header">🌐 Quick Select Country / اختيار سريع للدولة</p>', unsafe_allow_html=True)
-    slicer_cols = st.columns(len(FLAGS))
-    for i, (code, flag_url) in enumerate(FLAGS.items()):
-        with slicer_cols[i]:
-            if st.button(f"{code} 🚩", key=f"btn_{code}"):
-                st.session_state.query_input = COUNTRY_DISPLAY[code]['en']
-                st.rerun()
+# B. REFRESH / DESELECT BUTTON
+if st.session_state.selected_country or st.session_state.query_input:
+    if st.button("🔄 Clear Selection & Reset Dashboard", type="primary"):
+        st.session_state.selected_country = None
+        st.session_state.query_input = ""
+        st.rerun()
 
-# --- Search Bar & Voice ---
+st.divider()
+
+# C. SEARCH AREA
 with st.container(border=True):
     col_v1, col_v2, col_v3 = st.columns([1, 4, 1])
     with col_v1:
-        voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v187_mic")
+        voice_raw = mic_recorder(start_prompt="🎤 Voice", stop_prompt="🛑 Stop", key="v187_mic")
     
-    # If voice is used, update the query input
+    # Update query from voice if detected
     if voice_raw:
         voice_text = speech_to_text_robust(voice_raw)
         if voice_text:
             st.session_state.query_input = voice_text
 
     with col_v2:
-        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=st.session_state.query_input)
-        # Update session state if user types manually
-        if query != st.session_state.query_input:
-            st.session_state.query_input = query
-
+        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=st.session_state.query_input, key="main_search")
+        st.session_state.query_input = query
     with col_v3:
         if st.button("👂 Listen"):
             speak_text(query)
 
-# --- 6. EXECUTION & DASHBOARD ---
-if query and db is not None:
-    res_df, reports, msg, conf, success = engine_v18_6(query, db)
+# D. RESULTS EXECUTION
+current_query = st.session_state.query_input
+if (current_query or st.session_state.selected_country) and db is not None:
+    # If no text query but country selected, force a simple query
+    exec_query = current_query if current_query else f"Data for {st.session_state.selected_country}"
+    
+    res_df, reports, msg, conf, success = engine_v18_7(exec_query, db)
     
     if not success:
         st.markdown(f'<div class="centered-msg">{msg}</div>', unsafe_allow_html=True)
-        if st.button("🔄 Clear Search"):
-            st.session_state.query_input = ""
-            st.rerun()
     else:
         st.success(msg)
         if st.button("🔊 Play Results"):
             speak_text(msg)
         
-        # Dashboard Logic (Original)
+        # DISPLAY RESULTS DASHBOARD
         if len(reports) == 1:
             r = reports[0]
-            st.markdown(f'<div class="flag-container"><img src="{FLAGS.get(r["Adm"])}" class="flag-img"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="flag-container"><img src="{FLAGS.get(r["Adm"])}" class="flag-img flag-active"></div>', unsafe_allow_html=True)
             col1, col2, col3 = st.columns(3)
             col1.metric("DAB", r['Stats']['DAB'])
             col2.metric("TV", r['Stats']['TV'])
@@ -335,7 +342,7 @@ if query and db is not None:
             with c1:
                 map_data = res_df[res_df['Notice Type'].isin(STRICT_ASSIG)].dropna(subset=['lat_dec', 'lon_dec'])
                 if not map_data.empty:
-                    fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Notice Type", zoom=4, height=500, mapbox_style="carto-positron")
+                    fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Notice Type", zoom=4, height=500, mapbox_style="carto-positron", title=f"Geographical Map - {r['DisplayName']}")
                     st.plotly_chart(fig_map, use_container_width=True)
             with c2:
                 svc_data = pd.DataFrame({'Service': list(r['Stats'].keys()), 'Count': list(r['Stats'].values())})
@@ -350,17 +357,12 @@ if query and db is not None:
             st.divider()
             c1, c2 = st.columns(2)
             with c1:
-                st.plotly_chart(px.bar(pd.DataFrame(reports), x="DisplayName", y=["Assignments", "Allotments"], barmode="group"), use_container_width=True)
+                st.plotly_chart(px.bar(pd.DataFrame(reports), x="DisplayName", y=["Assignments", "Allotments"], barmode="group", title="Comparison by Notice Type"), use_container_width=True)
             with c2:
                 map_data = res_df[res_df['Notice Type'].isin(STRICT_ASSIG)].dropna(subset=['lat_dec', 'lon_dec'])
                 if not map_data.empty:
-                    fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Adm", zoom=3, height=500, mapbox_style="carto-positron")
+                    fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Adm", zoom=3, height=500, mapbox_style="carto-positron", title="Multi-Country Sites")
                     st.plotly_chart(fig_map, use_container_width=True)
 
         with st.expander("Detailed Technical Records"): 
             st.dataframe(res_df, use_container_width=True)
-        
-        # Add a clear button to go back to Slicer
-        if st.button("🗑️ Clear Result & Show Slicer"):
-            st.session_state.query_input = ""
-            st.rerun()
