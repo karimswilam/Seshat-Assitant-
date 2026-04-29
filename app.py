@@ -23,9 +23,8 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 # --- 1. CONFIG & INTERFACE ---
-st.set_page_config(layout="wide", page_title="Se-Chat v18.6 Professional", page_icon="📡")
+st.set_page_config(layout="wide", page_title="Se-Chat v18.6", page_icon="📡")
 
-# إضافة ستايل الـ Chiclet Slicer والـ UI
 st.markdown("""
     <style>
     .flag-container { display: flex; justify-content: center; margin-bottom: 10px; }
@@ -37,25 +36,12 @@ st.markdown("""
         padding: 20px; border: 2px solid #1E3A8A; border-radius: 10px; 
         background-color: #F0F4F8; margin: 20px 0;
     }
-    /* Chiclet Slicer Styling */
-    .slicer-wrapper {
-        display: flex;
-        overflow-x: auto;
-        gap: 12px;
-        padding: 10px 0px;
-        margin-bottom: 20px;
-    }
-    .chiclet-item {
-        flex: 0 0 auto;
-        width: 120px;
-        text-align: center;
-    }
     </style>
     """, unsafe_allow_html=True)
 
 LOGO_FILE = "Designer.png" 
-PROJECT_NAME = "Se-Chat v18.6"
-PROJECT_SLOGAN = "Spectrum Intelligence & International Coordination"
+PROJECT_NAME = "Se-Chat التنسيق الدولي للطيف v18.6"
+PROJECT_SLOGAN = " Spectrum Intelligence & Governance"
 
 header_col1, header_col2, header_col3 = st.columns([1, 2, 1])
 with header_col2:
@@ -101,12 +87,13 @@ COUNTRY_MAP = {
 
 SYNONYMS = {
     'ALLOT_KEY': ['allotment', 'allotments', 'توزيع', 'توزيعات', 'allot', 'allots'],
-    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'assig', 'assigs', 'تردد', 'ترددات'],
+    'ASSIG_KEY': ['assignment', 'assignments', 'تخصيص', 'تخصيصات', 'assig', 'assigs', 'تردد', 'ترددات', 'مstation', 'مستقبل'],
     'DAB_KEY': ['dab', 'داب', 'صوتية', 'صوتيه', 'digital audio'],
     'TV_KEY': ['tv', 'television', 'تلفزيون', 'تلفزيونية', 'مرئية', 'مرئيه'],
     'FM_KEY': ['fm', 'radio', 'راديو'],
-    'GE06_KEY': ['ge06', 'geneva06', 'جنيف 06'],
-    'GE84_KEY': ['ge84', 'geneva84', 'جنيف 84']
+    'EXCEPT_KEY': ['except', 'ma3ada', 'ماعدا', 'بدون', 'without', 'excluding'],
+    'GE06_KEY': ['ge06', 'geneva06', 'geneva 06', 'geneva o 6', 'جنيف 06', 'جي إي 06', 'ge06d'],
+    'GE84_KEY': ['ge84', 'geneva84', 'geneva 84', 'جنيف 84', 'جي إي 84', 'اربعة وثمانين', '84']
 }
 
 # --- 3. UTILITIES ---
@@ -149,11 +136,12 @@ def speech_to_text_robust(audio_data):
             audio = r.record(source)
         try:
             english_text = r.recognize_google(audio, language="en-US")
-            if any(word in english_text.lower() for word in ['egypt', 'saudi', 'assignment']): return english_text
+            if any(word in english_text.lower() for word in ['how', 'many', 'egypt', 'assignment', 'allotment', 'ge06']):
+                return english_text
         except: pass
         raw_text = r.recognize_google(audio, language="ar-EG")
         return apply_phonetic_correction(raw_text)
-    except: return None
+    except Exception: return None
 
 async def generate_audio_stream(text):
     try:
@@ -175,21 +163,22 @@ def speak_text(text):
         data = loop.run_until_complete(generate_audio_stream(text))
         if data: st.audio(data, format="audio/mp3", autoplay=True)
 
-# --- 4. ENGINE CORE ---
+# --- 4. ENGINE CORE V18.6 ---
 @st.cache_data
 def load_db():
     main_df = pd.DataFrame()
-    if os.path.exists("Data.xlsx"):
-        df1 = pd.read_excel("Data.xlsx")
+    target_main = "Data.xlsx"
+    if os.path.exists(target_main):
+        df1 = pd.read_excel(target_main)
         df1.columns = df1.columns.str.strip()
         df1['Source_Plan'] = 'GE06'
         main_df = df1
-    if os.path.exists("FM.xlsx"):
-        df2 = pd.read_excel("FM.xlsx")
+    target_fm = "FM.xlsx"
+    if os.path.exists(target_fm):
+        df2 = pd.read_excel(target_fm)
         df2.columns = df2.columns.str.strip()
         df2['Source_Plan'] = 'GE84'
         main_df = pd.concat([main_df, df2], ignore_index=True)
-    
     if not main_df.empty:
         mapping = {'Adm': ['Administration', 'Adm', 'Country'], 'Notice Type': ['Notice Type', 'NT']}
         for std_name, synonyms in mapping.items():
@@ -203,24 +192,43 @@ def load_db():
                 main_df['lon_dec'] = coords_split[0].apply(dms_to_decimal)
                 main_df['lat_dec'] = coords_split[1].apply(dms_to_decimal)
         if 'Assigned Frequency' in main_df.columns:
-            main_df['freq_val'] = pd.to_numeric(main_df['Assigned Frequency'].astype(str).str.extract(r'(\d+\.?\d*)')[0], errors='coerce')
+            def clean_freq(f):
+                try:
+                    num = re.findall(r"[-+]?\d*\.\d+|\d+", str(f))
+                    return float(num[0]) if num else 0.0
+                except: return 0.0
+            main_df['freq_val'] = main_df['Assigned Frequency'].apply(clean_freq)
         return main_df
     return None
 
 def engine_v18_6(q, data):
     q_low = q.lower().strip()
     is_ar = any(c in 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي' for c in q)
+    
+    # 1. Stopping Condition: Check Frequency Range
+    freq_numbers = re.findall(r"(\d+\.?\d*)", q_low)
+    if any(key in q_low for key in ['تردد', 'frequency']):
+        if len(freq_numbers) == 1:
+            return None, [], "Please write the frequency range / برجاء كتابة نطاق التردد (Start and Stop)", 0, False
+
+    # 2. Identify Countries
     selected_adms = [code for code, keys in COUNTRY_MAP.items() if any(k in q_low for k in keys)]
     selected_adms = list(dict.fromkeys(selected_adms))
-    if not selected_adms: return None, [], "Country not found.", 0, False
+    
+    if not selected_adms:
+        return None, [], "Country is not in database / هذه الدولة غير موجودة بقاعدة البيانات", 0, False
 
-    freq_numbers = re.findall(r"(\d+\.?\d*)", q_low)
+    # 3. Frequency Band Logic
     f_start, f_stop = (None, None)
     if len(freq_numbers) >= 2:
         nums = sorted([float(n) for n in freq_numbers])
         f_start, f_stop = nums[0], nums[1]
 
-    filter_plan = 'GE06' if any(x in q_low for x in SYNONYMS['GE06_KEY']) else ('GE84' if any(x in q_low for x in SYNONYMS['GE84_KEY']) else None)
+    # 4. Filter Logic
+    filter_plan = None
+    if any(x in q_low for x in SYNONYMS['GE06_KEY']): filter_plan = 'GE06'
+    elif any(x in q_low for x in SYNONYMS['GE84_KEY']): filter_plan = 'GE84'
+
     is_allot_only = any(x in q_low for x in SYNONYMS['ALLOT_KEY'])
     is_assig_only = any(x in q_low for x in SYNONYMS['ASSIG_KEY'])
     comp_type = "Assignments" if is_assig_only else ("Allotments" if is_allot_only else "Total")
@@ -229,18 +237,30 @@ def engine_v18_6(q, data):
     if any(x in q_low for x in SYNONYMS['DAB_KEY']): wanted_codes.extend(CAT_MAP['DAB'])
     if any(x in q_low for x in SYNONYMS['TV_KEY']): wanted_codes.extend(CAT_MAP['TV'])
     if any(x in q_low for x in SYNONYMS['FM_KEY']): wanted_codes.extend(CAT_MAP['FM'])
-    if not wanted_codes: wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
+    
+    if not wanted_codes: 
+        wanted_codes = CAT_MAP['DAB'] + CAT_MAP['TV'] + CAT_MAP['FM'] + ['G01']
 
     reports = []; final_df = pd.DataFrame()
+    
     for adm in selected_adms:
         adm_full = data[data['Adm'] == adm].copy()
         if filter_plan: adm_full = adm_full[adm_full['Source_Plan'] == filter_plan]
         if f_start and f_stop: adm_full = adm_full[(adm_full['freq_val'] >= f_start) & (adm_full['freq_val'] <= f_stop)]
+        
         adm_filtered = adm_full[adm_full['Notice Type'].isin(wanted_codes)]
         
         a_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ASSIG)])
         l_count = len(adm_filtered[adm_filtered['Notice Type'].isin(STRICT_ALLOT)])
         
+        # Zero Result Justification
+        if (a_count + l_count) == 0:
+            justification = f"{COUNTRY_DISPLAY[adm]['en']} has no "
+            if filter_plan == 'GE84' and is_allot_only: justification += "allotments in GE84 plan."
+            elif is_allot_only and any(x in q_low for x in SYNONYMS['DAB_KEY']): justification += "DAB allotments registered (GS2/DS2)."
+            else: justification += "records matching your search criteria."
+            if len(selected_adms) == 1: return None, [], justification, 0, False
+
         reports.append({
             "Adm": adm, "Assignments": a_count, "Allotments": l_count, "Total": a_count + l_count,
             "Stats": {'DAB': len(adm_filtered[adm_filtered['Notice Type'].isin(CAT_MAP['DAB'])]),
@@ -250,47 +270,26 @@ def engine_v18_6(q, data):
         })
         final_df = pd.concat([final_df, adm_filtered], ignore_index=True)
 
-    msg = ". ".join([f"{r['DisplayName']}: {r[comp_type] if comp_type in r else r['Total']} {comp_type}" for r in reports])
+    msg = ""
+    for r in reports:
+        val = r[comp_type] if comp_type in r else r['Total']
+        msg += f"{r['DisplayName']}: {val} {comp_type}. "
+    
     return final_df, reports, msg, 100, True
 
 # --- 5. UI FLOW ---
 db = load_db()
 
-# --- COUNTRY CHICLET SLICER ---
-st.markdown("### 🌍 Select Country")
-selected_from_slicer = ""
-
-# التصميم العرضي للسليسر
-with st.container():
-    # استخدام div كـ wrapper للـ scroll
-    st.markdown('<div class="slicer-wrapper">', unsafe_allow_html=True)
-    cols = st.columns(len(COUNTRY_DISPLAY))
-    for i, (code, info) in enumerate(COUNTRY_DISPLAY.items()):
-        with cols[i]:
-            st.image(FLAGS[code], width=70)
-            if st.button(info['ar'], key=f"btn_{code}"):
-                selected_from_slicer = info['ar']
-    st.markdown('</div>', unsafe_allow_html=True)
-
-st.divider()
-
-# --- VOICE & TEXT INPUT ---
 with st.container(border=True):
     col_v1, col_v2, col_v3 = st.columns([1, 4, 1])
     with col_v1:
         voice_raw = mic_recorder(start_prompt="🎤 Speak", stop_prompt="🛑 Stop", key="v186_mic")
-    
     input_val = speech_to_text_robust(voice_raw) if voice_raw else ""
-    
-    # دمج السليسر مع المدخلات
-    final_query = selected_from_slicer if selected_from_slicer else input_val
-    
     with col_v2:
-        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=final_query)
+        query = st.text_input("Spectrum Inquiry / استفسار الترددات:", value=input_val)
     with col_v3:
         if st.button("👂 Listen"): speak_text(query)
 
-# --- EXECUTION & DASHBOARD ---
 if query and db is not None:
     res_df, reports, msg, conf, success = engine_v18_6(query, db)
     
@@ -300,29 +299,43 @@ if query and db is not None:
         st.success(msg)
         if st.button("🔊 Play Results"): speak_text(msg)
         
+        # Dashboard Logic
         if len(reports) == 1:
+            # Single Country Dashboard: Split by Services
             r = reports[0]
             st.markdown(f'<div class="flag-container"><img src="{FLAGS.get(r["Adm"])}" class="flag-img"></div>', unsafe_allow_html=True)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("DAB", r['Stats']['DAB'])
-            c2.metric("TV", r['Stats']['TV'])
-            c3.metric("FM", r['Stats']['FM'])
+            col1, col2, col3 = st.columns(3)
+            col1.metric("DAB", r['Stats']['DAB'])
+            col2.metric("TV", r['Stats']['TV'])
+            col3.metric("FM", r['Stats']['FM'])
             
             st.divider()
-            d1, d2 = st.columns(2)
-            with d1:
+            c1, c2 = st.columns(2)
+            with c1:
+                # Map: Only Assignments for now
                 map_data = res_df[res_df['Notice Type'].isin(STRICT_ASSIG)].dropna(subset=['lat_dec', 'lon_dec'])
                 if not map_data.empty:
-                    st.plotly_chart(px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Notice Type", zoom=4, height=400, mapbox_style="carto-positron"), use_container_width=True)
-            with d2:
-                svc_df = pd.DataFrame({'Service': list(r['Stats'].keys()), 'Count': list(r['Stats'].values())})
-                st.plotly_chart(px.pie(svc_df, values='Count', names='Service', hole=0.4, title="Distribution"), use_container_width=True)
+                    fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Notice Type", zoom=4, height=500, mapbox_style="carto-positron")
+                    st.plotly_chart(fig_map, use_container_width=True)
+            with c2:
+                svc_data = pd.DataFrame({'Service': list(r['Stats'].keys()), 'Count': list(r['Stats'].values())})
+                st.plotly_chart(px.pie(svc_data, values='Count', names='Service', hole=0.4, title="Service Distribution"), use_container_width=True)
         else:
+            # Multi-Country Comparison
             m_cols = st.columns(len(reports))
             for i, r in enumerate(reports):
                 with m_cols[i]:
-                    st.image(FLAGS.get(r["Adm"]), width=60)
-                    st.metric(r['DisplayName'], r['Total'])
+                    st.markdown(f'<div class="flag-container"><img src="{FLAGS.get(r["Adm"])}" class="flag-img"></div>', unsafe_allow_html=True)
+                    st.metric(r['DisplayName'], f"Total: {r['Total']}", f"A:{r['Assignments']} | L:{r['Allotments']}")
+            
+            st.divider()
+            c1, c2 = st.columns(2)
+            with c1:
+                st.plotly_chart(px.bar(pd.DataFrame(reports), x="DisplayName", y=["Assignments", "Allotments"], barmode="group"), use_container_width=True)
+            with c2:
+                map_data = res_df[res_df['Notice Type'].isin(STRICT_ASSIG)].dropna(subset=['lat_dec', 'lon_dec'])
+                if not map_data.empty:
+                    fig_map = px.scatter_mapbox(map_data, lat="lat_dec", lon="lon_dec", color="Adm", zoom=3, height=500, mapbox_style="carto-positron")
+                    st.plotly_chart(fig_map, use_container_width=True)
 
-        with st.expander("Detailed Technical Records"):
-            st.dataframe(res_df, use_container_width=True)
+        with st.expander("Detailed Technical Records"): st.dataframe(res_df, use_container_width=True)
